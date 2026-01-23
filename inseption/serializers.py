@@ -1,7 +1,7 @@
 # serializers.py
 
 from rest_framework import serializers
-from .models import Schedule, Inspection
+from .models import Schedule, Inspection,RimType
 
 class ScheduleSerializer(serializers.ModelSerializer):
     class Meta:
@@ -102,3 +102,17 @@ class ScheduleDateRangeFilterSerializer(serializers.Serializer):
                 "start_date must be less than or equal to end_date"
             )
         return data
+    
+
+
+class RimTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RimType
+        fields = [
+            "id",
+            "name",
+            "description",
+            "is_active",
+            "created_at",
+        ]
+        read_only_fields = ["id", "created_at"]

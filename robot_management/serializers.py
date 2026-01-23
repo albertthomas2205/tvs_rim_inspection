@@ -1,6 +1,5 @@
 from rest_framework import serializers
-from .models import Robot,RobotMap
-
+from .models import Robot,RobotMap,RobotLocation
 class RobotSerializer(serializers.ModelSerializer):
     class Meta:
         model = Robot
@@ -66,3 +65,11 @@ class RobotMapSerializer(serializers.ModelSerializer):
         if obj.map_file and request:
             return request.build_absolute_uri(obj.map_file.url)
         return None
+
+
+
+class RobotLocationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RobotLocation
+        fields = ["robot", "location_data", "updated_at"]
+        read_only_fields = ["updated_at", "robot"]

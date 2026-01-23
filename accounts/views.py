@@ -2,14 +2,15 @@ from django.contrib.auth.models import User
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated,IsAdminUser
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils.crypto import get_random_string
 from .serializers import RegisterSerializer
 from datetime import timedelta
 from django.utils import timezone
 from .models import UserProfile
-
+from rest_framework.decorators import api_view, permission_classes
+from .serializers import UserListSerializer
 # ------------------- Registration -------------------
 class RegisterAPIView(APIView):
     permission_classes = [AllowAny]
@@ -181,3 +182,50 @@ class ResetPasswordAPIView(APIView):
             "success": True,
             "message": "Password reset successful"
         })
+
+
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def list_users(request):
+    users = User.objects.select_related("profile").all()
+    serializer = UserListSerializer(users, many=True)
+
+    return Response({
+        "success": True,
+        "message": "Users retrieved successfully",
+        "data": serializer.data
+    })
+
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def update_user(request, user_id):
+    try:
+        user = User.objects.select_related("profile").get(id=user_id)
+    except User.DoesNotExist:
+        return Response(
+            {"success": False, "message": "User not found"},
+            status=404
+        )
+
+    profile = user.profile
+
+    # Only allow profile updates
+    is_verified = request.data.get("is_verified")
+
+    if is_verified is not None:
+        profile.is_verified = is_verified
+        profile.save()
+
+    return Response({
+        "success": True,
+        "message": "User updated successfully",
+        "data": {
+            "user_id": user.id,
+            "username": user.username,
+            "is_verified": profile.is_verified
+        }
+    })

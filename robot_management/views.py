@@ -18,6 +18,15 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from django.db import transaction
 from rest_framework.pagination import PageNumberPagination
 
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
+
+from .models import RobotLocation
+from robot_management.models import Robot
+from .serializers import RobotLocationSerializer
+
 
 class RobotPagination(PageNumberPagination):
     page_size = 2                # max 5 robots
@@ -336,3 +345,52 @@ class RobotMapDetailAPIView(APIView):
             {"success": True, "message": "Map deleted successfully"},
             status=status.HTTP_204_NO_CONTENT
         )
+
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def robot_location(request, robot_id):
+    # -------- Validate robot --------
+    try:
+        robot = Robot.objects.get(id=robot_id)
+    except Robot.DoesNotExist:
+        return Response(
+            {"success": False, "message": "Robot not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # -------- GET LOCATION --------
+    if request.method == "GET":
+        try:
+            location = RobotLocation.objects.get(robot=robot)
+        except RobotLocation.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Location not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = RobotLocationSerializer(location)
+        return Response({
+            "success": True,
+            "message": "Robot location retrieved successfully",
+            "data": serializer.data
+        })
+
+    # -------- CREATE / UPDATE LOCATION --------
+    if request.method == "POST":
+        location_obj, created = RobotLocation.objects.get_or_create(
+            robot=robot,
+            defaults={"location_data": request.data.get("location_data")}
+        )
+
+        if not created:
+            location_obj.location_data = request.data.get("location_data")
+            location_obj.save()
+
+        serializer = RobotLocationSerializer(location_obj)
+        return Response({
+            "success": True,
+            "message": "Robot location saved successfully",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)

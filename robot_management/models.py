@@ -182,3 +182,13 @@ class RobotMap(models.Model):
 
     def __str__(self):
         return f"Map {self.version} for {self.robot.robo_id}"
+    
+
+class RobotLocation(models.Model):
+    robot = models.OneToOneField(
+        Robot,
+        on_delete=models.CASCADE,
+        related_name="location"
+    )
+    location_data = models.JSONField()
+    updated_at = models.DateTimeField(auto_now=True)

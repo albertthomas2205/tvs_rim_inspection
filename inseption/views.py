@@ -16,7 +16,7 @@ from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from rest_framework.generics import ListCreateAPIView,UpdateAPIView
 from .utilities import save_false_detection_image
-from rest_framework.permissions import AllowAny,IsAuthenticated
+from rest_framework.permissions import AllowAny,IsAuthenticated,IsAdminUser
 from rest_framework.exceptions import ValidationError
 # Import Channels
 from asgiref.sync import async_to_sync
@@ -28,6 +28,10 @@ from django.shortcuts import get_object_or_404
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.pagination import PageNumberPagination
 from robot_management.models import Robot
+
+from .models import RimType
+from .serializers import RimTypeSerializer
+
 
 # ----------- Custom Pagination Class -----------
 
@@ -951,3 +955,84 @@ class RobotInspectionStatsView(APIView):
                 **stats
             }
         })
+    
+
+
+
+# ---------------- LIST & CREATE ----------------
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def rim_type_list_create(request):
+    if request.method == "GET":
+        rim_types = RimType.objects.all().order_by("-created_at")
+        serializer = RimTypeSerializer(rim_types, many=True)
+        return Response({
+            "success": True,
+            "message": "Rim types retrieved successfully",
+            "data": serializer.data
+        })
+
+    if request.method == "POST":
+        serializer = RimTypeSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "success": True,
+                "message": "Rim type created successfully",
+                "data": serializer.data
+            }, status=status.HTTP_201_CREATED)
+
+        return Response({
+            "success": False,
+            "errors": serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ---------------- RETRIEVE / UPDATE / DELETE ----------------
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([IsAuthenticated, IsAdminUser])
+def rim_type_detail(request, rim_type_id):
+    try:
+        rim_type = RimType.objects.get(id=rim_type_id)
+    except RimType.DoesNotExist:
+        return Response(
+            {"success": False, "message": "Rim type not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    if request.method == "GET":
+        serializer = RimTypeSerializer(rim_type)
+        return Response({
+            "success": True,
+            "message": "Rim type retrieved successfully",
+            "data": serializer.data
+        })
+
+    if request.method == "PATCH":
+        serializer = RimTypeSerializer(
+            rim_type,
+            data=request.data,
+            partial=True
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "success": True,
+                "message": "Rim type updated successfully",
+                "data": serializer.data
+            })
+
+        return Response({
+            "success": False,
+            "errors": serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    # -------- SOFT DELETE --------
+    if request.method == "DELETE":
+        rim_type.is_active = False
+        rim_type.save()
+
+        return Response({
+            "success": True,
+            "message": "Rim type deactivated successfully"
+        }, status=status.HTTP_200_OK)

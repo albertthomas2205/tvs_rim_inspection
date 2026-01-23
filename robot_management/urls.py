@@ -2,7 +2,7 @@ from django.urls import path
 from .views import RobotEventBroadcastAPIView
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import RobotViewSet, RobotEventBroadcastAPIView,RobotMapDetailAPIView,RobotMapCreateUpdateAPIView
+from .views import RobotViewSet, RobotEventBroadcastAPIView,RobotMapDetailAPIView,RobotMapCreateUpdateAPIView,robot_location
 
 from .views import RobotViewSet
 
@@ -40,5 +40,11 @@ urlpatterns = [
         "robot-maps/<int:pk>/",
         RobotMapDetailAPIView.as_view(),
         name="robot-map-detail"
+    ),
+
+        path(
+        "robots/<int:robot_id>/location/",
+        robot_location,
+        name="robot-location"
     ),
 ]

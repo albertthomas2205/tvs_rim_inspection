@@ -22,10 +22,11 @@ urlpatterns = [
     path("speak/status/", views.SpeakStatusView.as_view()),
     path("emergency-stop/", views.EmergencyStopAPIView.as_view()),
 
-  path(
-    "robots/<int:robot_id>/inspection-stats/",
-    views.RobotInspectionStatsView.as_view(),
-    name="robot-inspection-stats"
-)
-    
+    path(
+        "robots/<int:robot_id>/inspection-stats/",
+        views.RobotInspectionStatsView.as_view(),
+        name="robot-inspection-stats"
+    ),
+    path("rim-types/", views.rim_type_list_create, name="rim-type-list-create"),
+    path("rim-types/<int:rim_type_id>/", views.rim_type_detail, name="rim-type-detail"),
 ]
