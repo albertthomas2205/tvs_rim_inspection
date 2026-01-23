@@ -2,6 +2,7 @@
 from rest_framework.views import APIView
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
+from rest_framework.generics import ListAPIView
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from django.utils import timezone
@@ -52,18 +53,19 @@ class InspectionPagination(PageNumberPagination):
 #     page_query_param = "page"
 
 
+
 class SchedulePagination(PageNumberPagination):
     page_size = 10
     page_size_query_param = None
     page_query_param = "page"
 
-    def get_paginated_response(self, data, status_totals):
+    def get_paginated_response(self, data, **extra):
         return Response({
             "count": self.page.paginator.count,
-            **status_totals,  # 🔥 flattened here
             "next": self.get_next_link(),
             "previous": self.get_previous_link(),
             "results": data,
+            **extra,  # 🔥 status_totals injected here
         })
 
 
@@ -591,6 +593,67 @@ def list_schedules(request):
     }, status_totals=status_totals)
 
 
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def list_schedules_by_robot(request, robot_id=None):
+    """
+    List schedules for a specific robot (robot_id) or all robots if None.
+    Returns paginated schedules + status totals (pending/processing/completed) and total count.
+    """
+
+    base_qs = Schedule.objects.filter(is_canceled=False)
+
+    # filter by robot if robot_id is provided
+    if robot_id:
+        try:
+            robot_id = int(robot_id)
+        except ValueError:
+            return Response(
+                {"success": False, "message": "Invalid robot_id"},
+                status=400
+            )
+
+        # ensure robot exists
+        get_object_or_404(Robot, id=robot_id)
+        base_qs = base_qs.filter(robot__id=robot_id)
+
+    # calculate status totals
+    status_counts = base_qs.values("status").annotate(count=Count("id"))
+
+    # map DB statuses to API output
+    status_mapping = {
+        "scheduled": "pending",
+        "processing": "processing",
+        "completed": "completed"
+    }
+
+    # initialize all statuses to 0
+    status_totals = {v: 0 for v in status_mapping.values()}
+
+    # fill actual counts
+    for item in status_counts:
+        db_status = item["status"]
+        api_status = status_mapping.get(db_status, db_status)
+        status_totals[api_status] = item["count"]
+
+    # add total
+    status_totals["total"] = sum(status_totals.values())
+
+    # paginate
+    paginator = SchedulePagination()
+    page = paginator.paginate_queryset(base_qs.order_by("-id"), request)
+    serializer = ScheduleSerializer(page, many=True)
+
+    # return paginated response with status totals
+    return paginator.get_paginated_response(
+        serializer.data,
+        status_totals=status_totals
+    )
+
+
+
 class InspectionListCreateView(ListCreateAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = InspectionSerializer
@@ -858,3 +921,33 @@ class ScheduleFilterByDateRangeView(APIView):
             "count": schedules.count(),
             "schedules": ScheduleSerializer(schedules, many=True).data
         }, status=status.HTTP_200_OK)
+    
+
+
+
+
+class RobotInspectionStatsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, robot_id):
+        inspections = Inspection.objects.filter(
+            schedule__robot_id=robot_id
+        )
+
+        stats = inspections.aggregate(
+            total_inspections=Count("id"),
+            total_defected=Count("id", filter=Q(is_defect=True)),
+            total_passed=Count("id", filter=Q(is_defect=False)),
+            total_approved=Count("id", filter=Q(is_approved=True)),
+            total_verified=Count("id", filter=Q(is_human_verified=True)),
+            total_false_detected=Count("id", filter=Q(false_detected=True)),
+        )
+
+        return Response({
+            "success": True,
+            "message": "Robot inspections retrieved successfully",
+            "data": {
+                "robot_id": robot_id,
+                **stats
+            }
+        })

@@ -21,7 +21,7 @@ class InspectionHumanVerifySerializer(serializers.ModelSerializer):
             "false_detected",
             "is_approved",
             "correct_label",
-            "description",
+            "user_description",
         ]
 
     def validate(self, attrs):
@@ -40,7 +40,7 @@ class InspectionHumanVerifySerializer(serializers.ModelSerializer):
             self.instance.correct_label if self.instance else None
         )
 
-        description = attrs.get("description")
+        user_description = attrs.get("user_description")
 
         # ---------------- AI CORRECT ----------------
         if false_detected is False:
@@ -53,7 +53,7 @@ class InspectionHumanVerifySerializer(serializers.ModelSerializer):
         # ---------------- AI WRONG ----------------
         if false_detected is True:
             # Description REQUIRED
-            if not description:
+            if not user_description:
                 raise serializers.ValidationError({
                     "description": "Description is required when false_detected is true."
                 })

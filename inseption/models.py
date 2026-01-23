@@ -79,6 +79,8 @@ class Inspection(models.Model):
 
     description = models.TextField(null=True, blank=True)
 
+    user_description = models.TextField(null=True, blank=True)
+
     is_approved = models.BooleanField(default=False)
 
     # Required ONLY when false_detected = True
@@ -117,3 +119,5 @@ class EmergencyStop(models.Model):
 
     def __str__(self):
         return f"Emergency Stop: {'ON' if self.is_emergency_stop else 'OFF'}"
+
+

@@ -6,16 +6,9 @@ from . import views
 urlpatterns = [
     
     path("schedule/", views.list_schedules),
-    path(
-        "robots/<int:robot_id>/schedule/create/",
-        views.create_schedule,
-        name="create-schedule"
-    ),
-    path(
-        "robots/<int:robot_id>/schedule/create-immediately/",
-        views.create_schedule_immediately,
-        name="create-schedule-immediately"
-    ),
+    path("robots/<int:robot_id>/schedules/", views.list_schedules_by_robot,name="list-schedules" ),
+    path("robots/<int:robot_id>/schedule/create/", views.create_schedule,name="create-schedule" ),
+    path("robots/<int:robot_id>/schedule/create-immediately/",views.create_schedule_immediately,name="create-schedule-immediately"),
     path("schedule/create/", views.create_schedule),
     path("schedule/create-immediately/", views.create_schedule_immediately),
     path("schedule/delete/<int:schedule_id>/", views.delete_schedule),
@@ -28,5 +21,11 @@ urlpatterns = [
     path('speak/stop/', views.StopSpeakView.as_view(), name='stop-speak'),
     path("speak/status/", views.SpeakStatusView.as_view()),
     path("emergency-stop/", views.EmergencyStopAPIView.as_view()),
+
+  path(
+    "robots/<int:robot_id>/inspection-stats/",
+    views.RobotInspectionStatsView.as_view(),
+    name="robot-inspection-stats"
+)
     
 ]
