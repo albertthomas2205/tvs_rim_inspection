@@ -15,7 +15,7 @@ urlpatterns = [
     path("schedule/delete/<int:schedule_id>/", views.delete_schedule),
     path('schedule/update-immediately/<int:schedule_id>/', views.update_schedule, name='update_schedule'),
     path("schedule/<int:schedule_id>/inspections/", views.InspectionListCreateView.as_view()),
-    path("schedule/filter-by-date-range/", views.ScheduleFilterByDateRangeView.as_view(), name="schedule-filter-by-date-range"),
+    path("schedule/robot/<int:robot_id>/filter-by-date-range/", views.ScheduleFilterByDateRangeView.as_view(), name="schedule-filter-by-date-range"),
     path("inspection/<int:pk>/", views.InspectionDetailView.as_view()),
     path("inspection/<int:pk>/verify/", views.InspectionHumanVerifyAPIView.as_view()),
     path('speak/start/', views.StartSpeakView.as_view(), name='start-speak'),

@@ -25,7 +25,7 @@ from rest_framework import status
 
 from .models import RobotLocation
 from robot_management.models import Robot
-from .serializers import RobotLocationSerializer
+from .serializers import RobotLocationSerializer,EmergencySerializer,SpeakStartSerializer
 
 from django.shortcuts import get_object_or_404
 
@@ -34,9 +34,9 @@ from .models import RobotNavigation, Robot
 from .serializers import RobotNavigationUpdateSerializer
 
 class RobotPagination(PageNumberPagination):
-    page_size = 2                # max 5 robots
+    page_size = 4               # max 5 robots
     page_size_query_param = 'page_size'
-    max_page_size = 2
+    max_page_size = 4
 
 
 class RobotViewSet(viewsets.ModelViewSet):
@@ -453,3 +453,112 @@ class RobotNavigationAPIView(APIView):
             serializer.errors,
             status=status.HTTP_400_BAD_REQUEST
         )
+    
+
+
+
+
+# Utility function to broadcast to robot WebSocket using robo_id
+def broadcast_to_robot_by_robo_id(robo_id, event, data):
+    channel_layer = get_channel_layer()
+    group_name = f"robot_message_{robo_id}"
+    async_to_sync(channel_layer.group_send)(
+        group_name,
+        {
+            "type": "robot_message",
+            "event": event,
+            "data": data
+        }
+    )
+
+
+# Emergency API
+class EmergencyView(APIView):
+    def get(self, request, robot_id):
+        robot = Robot.objects.filter(pk=robot_id).first()
+        if not robot:
+            return Response({
+                "success": False,
+                "message": "Robot not found"
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = EmergencySerializer(robot)
+        return Response({
+            "success": True,
+            "message": "Emergency status retrieved successfully",
+            "data": serializer.data
+        })
+
+    def post(self, request, robot_id):
+        robot = Robot.objects.filter(pk=robot_id).first()
+        if not robot:
+            return Response({
+                "success": False,
+                "message": "Robot not found"
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data
+
+        # Default to False if no value is passed
+        robot.emergency = data.get('emergency', False)
+        robot.save()
+
+        # 🔹 Broadcast to WebSocket using robo_id
+        broadcast_to_robot_by_robo_id(
+            robot.robo_id,  # <-- use robo_id from Robot model
+            event="emergency_update",
+            data={"emergency": robot.emergency}
+        )
+
+        serializer = EmergencySerializer(robot)
+        return Response({
+            "success": True,
+            "message": f"Emergency status updated to {robot.emergency}",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+
+
+# Speak Start API
+class SpeakStartView(APIView):
+    def get(self, request, robot_id):
+        robot = Robot.objects.filter(pk=robot_id).first()
+        if not robot:
+            return Response({
+                "success": False,
+                "message": "Robot not found"
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = SpeakStartSerializer(robot)
+        return Response({
+            "success": True,
+            "message": "Speak start status retrieved successfully",
+            "data": serializer.data
+        })
+
+    def post(self, request, robot_id):
+        robot = Robot.objects.filter(pk=robot_id).first()
+        if not robot:
+            return Response({
+                "success": False,
+                "message": "Robot not found"
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data
+
+        # Default to False if no value is passed
+        robot.speak_start = data.get('speak_start', False)
+        robot.save()
+
+        # 🔹 Broadcast to WebSocket using robo_id
+        broadcast_to_robot_by_robo_id(
+            robot.robo_id,  # <-- use robo_id from Robot model
+            event="speak_start_update",
+            data={"speak_start": robot.speak_start}
+        )
+
+        serializer = SpeakStartSerializer(robot)
+        return Response({
+            "success": True,
+            "message": f"Speak start status updated to {robot.speak_start}",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)

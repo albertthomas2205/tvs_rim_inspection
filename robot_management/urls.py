@@ -3,8 +3,7 @@ from .views import RobotEventBroadcastAPIView
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import RobotViewSet, RobotEventBroadcastAPIView,RobotMapDetailAPIView,RobotMapCreateUpdateAPIView,robot_location,RobotNavigationAPIView
-
-from .views import RobotViewSet
+from .views import EmergencyView, SpeakStartView, RobotViewSet
 
 robot_list = RobotViewSet.as_view({
     'get': 'list',         # GET /robots/ → list all robots
@@ -52,5 +51,8 @@ urlpatterns = [
         "robots/<int:robot_id>/navigation/",
         RobotNavigationAPIView.as_view(),
         name="robot-navigation"
-    )
+    ),
+
+    path('robots/<int:robot_id>/emergency/', EmergencyView.as_view(), name='robot_emergency'),
+    path('robots/<int:robot_id>/speak_start/', SpeakStartView.as_view(), name='robot_speak_start'),
 ]

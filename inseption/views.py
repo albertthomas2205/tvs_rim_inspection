@@ -51,15 +51,10 @@ class InspectionPagination(PageNumberPagination):
         })
     
 
-# class SchedulePagination(PageNumberPagination):
-#     page_size = 10                  # max records per page
-#     page_size_query_param = None    # prevent client override
-#     page_query_param = "page"
-
 
 
 class SchedulePagination(PageNumberPagination):
-    page_size = 10
+    page_size = 8
     page_size_query_param = None
     page_query_param = "page"
 
@@ -79,94 +74,6 @@ class SchedulePagination(PageNumberPagination):
     responses={201: "Schedule created"}
 )
 
-
-# @api_view(["POST"])
-# def create_schedule(request):
-#     location = request.data.get("location")
-#     date = request.data.get("scheduled_date")
-#     time = request.data.get("scheduled_time")
-
-#     # ---- REQUIRED FIELD VALIDATION ----
-#     missing_fields = []
-#     if not location:
-#         missing_fields.append("location")
-#     if not date:
-#         missing_fields.append("scheduled_date")
-#     if not time:
-#         missing_fields.append("scheduled_time")
-
-#     if missing_fields:
-#         return Response(
-#             {
-#                 "status": 400,
-#                 "message": f"Missing required fields: {', '.join(missing_fields)}",
-#                 "success": False,
-#             },
-#             status=status.HTTP_400_BAD_REQUEST
-#         )
-
-#     # ---- TIME PARSING ----
-#     def parse_time(t):
-#         try:
-#             return datetime.strptime(t, "%H:%M").time()
-#         except ValueError:
-#             return datetime.strptime(t, "%H:%M:%S").time()
-
-#     scheduled_time = parse_time(time)
-#     scheduled_date = datetime.strptime(date, "%Y-%m-%d").date()
-
-#     # ---- COMPUTE 3-MINUTE END TIME ----
-#     new_start_dt = datetime.combine(scheduled_date, scheduled_time)
-#     new_end_dt = new_start_dt + timedelta(minutes=3)
-#     new_end_time = new_end_dt.time()
-
-#     # ---- OVERLAP CHECK ----
-#     overlapping = Schedule.objects.filter(
-#         location=location,
-#         scheduled_date=scheduled_date,
-#         scheduled_time__lt=new_end_time,
-#         end_time__gt=scheduled_time
-#     ).exists()
-
-#     if overlapping:
-#         return Response(
-#             {
-#                 "status": 400,
-#                 "message": "Time slot already booked for this location",
-#                 "success": False
-#             },
-#             status=status.HTTP_400_BAD_REQUEST,
-#         )
-
-#     # ---- SAVE SCHEDULE with UPDATED 3-MIN END TIME ----
-#     data = request.data.copy()
-#     data["end_time"] = new_end_time  # <<<<<< CRITICAL FIX
-
-#     serializer = ScheduleSerializer(data=data)
-#     serializer.is_valid(raise_exception=True)
-#     schedule = serializer.save()
-
-#     # ---- CELERY TASKS ----
-#     start_datetime = timezone.make_aware(
-#         datetime.combine(schedule.scheduled_date, schedule.scheduled_time)
-#     )
-#     end_datetime = timezone.make_aware(
-#         datetime.combine(schedule.scheduled_date, schedule.end_time)
-#     )
-
-#     set_status_processing.apply_async(args=[schedule.id], eta=start_datetime)
-#     set_status_completed.apply_async(args=[schedule.id], eta=end_datetime)
-
-#     # ---- SUCCESS RESPONSE ----
-#     return Response(
-#         {
-#             "status": 201,
-#             "message": "Schedule created successfully",
-#             "success": True,
-#             "data": serializer.data
-#         },
-#         status=status.HTTP_201_CREATED
-#     )
 
 @api_view(["POST"])
 def create_schedule(request, robot_id):
@@ -449,9 +356,6 @@ def update_schedule(request, schedule_id):
         status=status.HTTP_200_OK
     )
 
-
-
-
 # -----------------------------------
 # DELETE SCHEDULE
 # -----------------------------------
@@ -525,43 +429,6 @@ def create_inspection(request):
     )
 
 
-# -----------------------------------
-# LIST SCHEDULES
-# -----------------------------------
-# @api_view(["GET"])
-# @permission_classes([IsAuthenticated])
-# def list_schedules(request):
-
-#     schedules = Schedule.objects.filter(is_canceled=False).order_by("-id")
-#     serializer = ScheduleSerializer(schedules, many=True)
-
-#     return Response(
-#         {
-#             "success": True,
-#             "message": "Schedules fetched successfully",
-#             "schedules": serializer.data,
-#         },
-#         status=status.HTTP_200_OK
-#     )
-
-
-# @api_view(["GET"])
-# @permission_classes([IsAuthenticated])
-# def list_schedules(request):
-
-#     schedules = Schedule.objects.filter(is_canceled=False).order_by("-id")
-
-#     paginator = SchedulePagination()
-#     paginated_qs = paginator.paginate_queryset(schedules, request)
-
-#     serializer = ScheduleSerializer(paginated_qs, many=True)
-
-#     return paginator.get_paginated_response({
-#         "success": True,
-#         "message": "Schedules fetched successfully",
-#         "schedules": serializer.data,
-#     })
-
 
 @api_view(["POST"])
 @permission_classes([IsAdminUser])
@@ -618,12 +485,11 @@ def list_schedules(request):
 def list_schedules_by_robot(request, robot_id=None):
     """
     List schedules for a specific robot (robot_id) or all robots if None.
-    Returns paginated schedules + status totals (pending/processing/completed) and total count.
+    Returns paginated schedules + status totals.
     """
 
     base_qs = Schedule.objects.filter(is_canceled=False)
 
-    # filter by robot if robot_id is provided
     if robot_id:
         try:
             robot_id = int(robot_id)
@@ -633,42 +499,44 @@ def list_schedules_by_robot(request, robot_id=None):
                 status=400
             )
 
-        # ensure robot exists
         get_object_or_404(Robot, id=robot_id)
         base_qs = base_qs.filter(robot__id=robot_id)
 
-    # calculate status totals
+    # 🔹 status totals
     status_counts = base_qs.values("status").annotate(count=Count("id"))
 
-    # map DB statuses to API output
     status_mapping = {
         "scheduled": "pending",
         "processing": "processing",
-        "completed": "completed"
+        "completed": "completed",
     }
 
-    # initialize all statuses to 0
     status_totals = {v: 0 for v in status_mapping.values()}
 
-    # fill actual counts
     for item in status_counts:
-        db_status = item["status"]
-        api_status = status_mapping.get(db_status, db_status)
+        api_status = status_mapping.get(item["status"])
         status_totals[api_status] = item["count"]
 
-    # add total
     status_totals["total"] = sum(status_totals.values())
 
-    # paginate
+    # 🔹 pagination
     paginator = SchedulePagination()
     page = paginator.paginate_queryset(base_qs.order_by("-id"), request)
     serializer = ScheduleSerializer(page, many=True)
 
-    # return paginated response with status totals
-    return paginator.get_paginated_response(
-        serializer.data,
-        status_totals=status_totals
-    )
+    paginated_response = paginator.get_paginated_response(serializer.data)
+
+    # 🔹 final wrapped response
+    paginated_response.data = {
+        "success": True,
+        "message": "Schedules fetched successfully",
+        "data": {
+            "result": paginated_response.data,
+            "status_totals": status_totals,
+        },
+    }
+
+    return paginated_response
 
 
 
@@ -917,11 +785,10 @@ class EmergencyStopAPIView(APIView):
 
 
 
-
 class ScheduleFilterByDateRangeView(APIView):
     permission_classes = [AllowAny]
 
-    def post(self, request):
+    def post(self, request, robot_id):
         serializer = ScheduleDateRangeFilterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
@@ -929,6 +796,7 @@ class ScheduleFilterByDateRangeView(APIView):
         end_date = serializer.validated_data["end_date"]
 
         schedules = Schedule.objects.filter(
+            robot_id=robot_id,              # ✅ robot filter
             scheduled_date__range=(start_date, end_date),
             is_canceled=False
         ).order_by("scheduled_date", "scheduled_time")
@@ -936,12 +804,10 @@ class ScheduleFilterByDateRangeView(APIView):
         return Response({
             "success": True,
             "message": "Schedules retrieved successfully",
+            "robot_id": robot_id,
             "count": schedules.count(),
             "schedules": ScheduleSerializer(schedules, many=True).data
         }, status=status.HTTP_200_OK)
-    
-
-
 
 
 class RobotInspectionStatsView(APIView):
@@ -970,8 +836,6 @@ class RobotInspectionStatsView(APIView):
             }
         })
     
-
-
 
 # ---------------- LIST & CREATE ----------------
 @api_view(["GET", "POST"])

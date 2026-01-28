@@ -67,6 +67,8 @@ class Robot(models.Model):
         help_text="Indicates emergency stop or critical state"
     )
 
+    speak_start = models.BooleanField(default=False)
+
 
     # Inspection
     inspection_status = models.CharField(
