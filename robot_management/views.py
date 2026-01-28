@@ -27,6 +27,11 @@ from .models import RobotLocation
 from robot_management.models import Robot
 from .serializers import RobotLocationSerializer
 
+from django.shortcuts import get_object_or_404
+
+
+from .models import RobotNavigation, Robot
+from .serializers import RobotNavigationUpdateSerializer
 
 class RobotPagination(PageNumberPagination):
     page_size = 2                # max 5 robots
@@ -394,3 +399,57 @@ def robot_location(request, robot_id):
             "message": "Robot location saved successfully",
             "data": serializer.data
         }, status=status.HTTP_200_OK)
+    
+
+
+
+class RobotNavigationAPIView(APIView):
+
+    def get(self, request, robot_id):
+        robot = get_object_or_404(Robot, id=robot_id)
+
+        navigation, created = RobotNavigation.objects.get_or_create(
+            robot=robot,
+            defaults={
+                "navigation_mode": "stationary",
+                "navigation_style": None
+            }
+        )
+
+        serializer = RobotNavigationUpdateSerializer(navigation)
+
+        return Response({
+            "status": "success",
+            "created": created,
+            "data": serializer.data
+        })
+
+    def patch(self, request, robot_id):
+        robot = get_object_or_404(Robot, id=robot_id)
+
+        navigation, created = RobotNavigation.objects.get_or_create(
+            robot=robot,
+            defaults={
+                "navigation_mode": "stationary",
+                "navigation_style": None
+            }
+        )
+
+        serializer = RobotNavigationUpdateSerializer(
+            navigation,
+            data=request.data,
+            partial=True
+        )
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "status": "success",
+                "created": created,
+                "data": serializer.data
+            })
+
+        return Response(
+            serializer.errors,
+            status=status.HTTP_400_BAD_REQUEST
+        )

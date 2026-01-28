@@ -109,7 +109,7 @@ class Robot(models.Model):
         self.save(update_fields=["is_deleted", "is_active"])
 
     def __str__(self):
-        return f"{self.name} ({self.robot_id})"
+        return f"{self.name} ({self.robo_id})"
     
 
 
@@ -192,3 +192,60 @@ class RobotLocation(models.Model):
     )
     location_data = models.JSONField()
     updated_at = models.DateTimeField(auto_now=True)
+
+
+
+class RobotNavigation(models.Model):
+
+    NAVIGATION_MODE_CHOICES = [
+        ('autonomous', 'Autonomous'),
+        ('stationary', 'Stationary'),
+    ]
+
+    NAVIGATION_STYLE_CHOICES = [
+        ('free', 'Free'),
+        ('strict', 'Strict'),
+        ('strict_with_autonomous', 'Strict With Autonomous'),
+    ]
+
+    # ✅ One-to-One relation (each robot has only one navigation config)
+    robot = models.OneToOneField(
+        'Robot',               # or Robot if already imported
+        on_delete=models.CASCADE,
+        related_name='navigation'
+    )
+
+    navigation_mode = models.CharField(
+        max_length=20,
+        choices=NAVIGATION_MODE_CHOICES
+    )
+
+    navigation_style = models.CharField(
+        max_length=30,
+        choices=NAVIGATION_STYLE_CHOICES,
+        null=True,
+        blank=True
+    )
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def clean(self):
+        """
+        Enforce navigation rules
+        """
+        if self.navigation_mode == 'stationary' and self.navigation_style is not None:
+            raise ValidationError({
+                "navigation_style": "Navigation style must be null when mode is stationary."
+            })
+
+        if self.navigation_mode == 'autonomous' and self.navigation_style is None:
+            raise ValidationError({
+                "navigation_style": "Navigation style is required when mode is autonomous."
+            })
+
+    def save(self, *args, **kwargs):
+        self.full_clean()   # 🔒 Always enforce validation
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.robot} - {self.navigation_mode}"

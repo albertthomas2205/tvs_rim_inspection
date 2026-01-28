@@ -563,6 +563,20 @@ def create_inspection(request):
 #     })
 
 
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def cancel_all_schedules(request):
+    updated_count = Schedule.objects.filter(is_canceled=False).update(
+        is_canceled=True
+    )
+
+    return Response({
+        "success": True,
+        "message": "All schedules canceled successfully",
+        "affected_rows": updated_count
+    })
+
+
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
