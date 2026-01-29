@@ -23,9 +23,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 
-from .models import RobotLocation
+from .models import RobotLocation,CalibrateHand
 from robot_management.models import Robot
-from .serializers import RobotLocationSerializer,EmergencySerializer,SpeakStartSerializer
+from .serializers import RobotLocationSerializer,EmergencySerializer,SpeakStartSerializer,CalibrateHandSerializer
 
 from django.shortcuts import get_object_or_404
 
@@ -562,3 +562,71 @@ class SpeakStartView(APIView):
             "message": f"Speak start status updated to {robot.speak_start}",
             "data": serializer.data
         }, status=status.HTTP_200_OK)
+    
+
+
+
+class CalibrateHandAPI(APIView):
+
+    def get_object(self, robo_id):
+        robot = get_object_or_404(Robot, id=robo_id)
+        calibration, _ = CalibrateHand.objects.get_or_create(robot=robot)
+        return calibration
+
+    def get(self, request, robo_id):
+        calibration = self.get_object(robo_id)
+        serializer = CalibrateHandSerializer(calibration)
+        return Response(
+            {"status": True, "data": serializer.data},
+            status=status.HTTP_200_OK
+        )
+
+    def post(self, request, robo_id):
+        calibration = self.get_object(robo_id)
+
+        serializer = CalibrateHandSerializer(
+            calibration,
+            data=request.data,
+            partial=True
+        )
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {
+                    "status": True,
+                    "message": "Calibration saved successfully",
+                    "data": serializer.data
+                },
+                status=status.HTTP_200_OK
+            )
+
+        return Response(
+            {"status": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    def patch(self, request, robo_id):
+        calibration = self.get_object(robo_id)
+
+        serializer = CalibrateHandSerializer(
+            calibration,
+            data=request.data,
+            partial=True
+        )
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {
+                    "status": True,
+                    "message": "Calibration updated successfully",
+                    "data": serializer.data
+                },
+                status=status.HTTP_200_OK
+            )
+
+        return Response(
+            {"status": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST
+        )

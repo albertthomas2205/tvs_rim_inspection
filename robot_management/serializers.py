@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Robot,RobotMap,RobotLocation,RobotNavigation
+from .models import Robot,RobotMap,RobotLocation,RobotNavigation,CalibrateHand
 class RobotSerializer(serializers.ModelSerializer):
     class Meta:
         model = Robot
@@ -96,3 +96,37 @@ class SpeakStartSerializer(serializers.ModelSerializer):
     class Meta:
         model = Robot
         fields = ['speak_start']
+
+
+class CalibrateHandSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = CalibrateHand
+        exclude = ("robot",)
+
+    def validate(self, data):
+        """
+        Rules:
+        - Hand activation does NOT require points
+        - Points are optional
+        - If a point is provided, it must be a JSON object
+        """
+
+        point_fields = {
+            "left_point_one": data.get("left_point_one"),
+            "left_point_two": data.get("left_point_two"),
+            "left_point_three": data.get("left_point_three"),
+            "right_point_one": data.get("right_point_one"),
+            "right_point_two": data.get("right_point_two"),
+            "right_point_three": data.get("right_point_three"),
+        }
+
+        for field_name, value in point_fields.items():
+            # validate only if point is being sent
+            if value is not None:
+                if not isinstance(value, dict):
+                    raise serializers.ValidationError({
+                        field_name: "Must be a valid JSON object"
+                    })
+
+        return data

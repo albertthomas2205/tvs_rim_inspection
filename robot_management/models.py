@@ -251,3 +251,31 @@ class RobotNavigation(models.Model):
 
     def __str__(self):
         return f"{self.robot} - {self.navigation_mode}"
+    
+
+class CalibrateHand(models.Model):
+    robot = models.ForeignKey(
+        "Robot",
+        on_delete=models.CASCADE,
+        related_name="calibrate_hands"
+    )
+
+    # Hand status
+    left_hand_active = models.BooleanField(default=False)
+    right_hand_active = models.BooleanField(default=False)
+
+    # Left hand points (each is JSON)
+    left_point_one = models.JSONField(null=True, blank=True)
+    left_point_two = models.JSONField(null=True, blank=True)
+    left_point_three = models.JSONField(null=True, blank=True)
+
+    # Right hand points (each is JSON)
+    right_point_one = models.JSONField(null=True, blank=True)
+    right_point_two = models.JSONField(null=True, blank=True)
+    right_point_three = models.JSONField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Hand Calibration - Robot {self.robot_id}"
