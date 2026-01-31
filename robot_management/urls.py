@@ -2,7 +2,7 @@ from django.urls import path
 from .views import RobotEventBroadcastAPIView
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import RobotViewSet, RobotEventBroadcastAPIView,RobotMapDetailAPIView,RobotMapCreateUpdateAPIView,robot_location,RobotNavigationAPIView,CalibrateHandAPI
+from .views import RobotViewSet, RobotEventBroadcastAPIView,RobotMapDetailAPIView,RobotMapCreateUpdateAPIView,robot_location,RobotNavigationAPIView
 from .views import EmergencyView, SpeakStartView, RobotViewSet
 from .views import *
 robot_list = RobotViewSet.as_view({
@@ -29,12 +29,6 @@ urlpatterns = [
         name="robot-map"
     ),
     
-
-    # path(
-    #     "robot-maps/",
-    #     RobotMapListCreateAPIView.as_view(),
-    #     name="robot-map-list-create"
-    # ),
     path(
         "robot-maps/<int:pk>/",
         RobotMapDetailAPIView.as_view(),
@@ -55,25 +49,6 @@ urlpatterns = [
 
     path('robots/<int:robot_id>/emergency/', EmergencyView.as_view(), name='robot_emergency'),
     path('robots/<int:robot_id>/speak_start/', SpeakStartView.as_view(), name='robot_speak_start'),
-    path(
-        "robots/<int:robo_id>/calibrate-hand/",
-        CalibrateHandAPI.as_view(),
-        name="calibrate-hand"
-    ),
-    path(
-        "robots/<int:robo_id>/calibration/left-hand/",
-        LeftHandActivationAPI.as_view()
-    ),
-    path(
-        "robots/<int:robo_id>/calibration/right-hand/",
-        RightHandActivationAPI.as_view()
-    ),
-
-
-
-
-
-    
 
       # 1️⃣ Activate / Deactivate LEFT or RIGHT hand
     path(

@@ -1,14 +1,56 @@
 from rest_framework import serializers
 from .models import Robot,RobotMap,RobotLocation,RobotNavigation,CalibrateHand,Profile
+
+
+
 class RobotSerializer(serializers.ModelSerializer):
+    schedule_summary = serializers.SerializerMethodField()
+    inspection_summary = serializers.SerializerMethodField()
+
     class Meta:
         model = Robot
-        fields = "__all__"
-        read_only_fields = (
-            "id", "created_at", "updated_at",
-            "is_deleted", "created_by", "updated_by"
-        )
+        fields = [
+            "id",
 
+            # grouped summaries
+            "schedule_summary",
+            "inspection_summary",
+
+            # robot fields
+            "robot_type",
+            "name",
+            "robo_id",
+            "model_number",
+            "local_ip",
+            "status",
+            "emergency",
+            "speak_start",
+            "inspection_status",
+            "last_inspected_at",
+            "is_active",
+            "created_at",
+            "updated_at",
+            "created_by",
+            "updated_by",
+        ]
+
+    def get_schedule_summary(self, obj):
+        return {
+            "total": obj.total_schedules,
+            "scheduled": obj.scheduled_count,
+            "processing": obj.processing_count,
+            "completed": obj.completed_count,
+        }
+
+    def get_inspection_summary(self, obj):
+        return {
+            "total": obj.total_inspections,
+            "defected": obj.total_defected,
+            "non_defected": obj.total_non_defected,
+            "approved": obj.approved_count,
+            "human_verified": obj.human_verified_count,
+            "pending_verification": obj.pending_verification_count,
+        }
 
 class RobotMapSerializer(serializers.ModelSerializer):
     uploaded_by = serializers.ReadOnlyField(source="uploaded_by.username")

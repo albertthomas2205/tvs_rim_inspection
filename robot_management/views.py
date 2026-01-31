@@ -22,7 +22,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
-
+from django.db.models import Count, Q
 from .models import RobotLocation,CalibrateHand,Profile
 from robot_management.models import Robot
 from .serializers import RobotLocationSerializer,EmergencySerializer,SpeakStartSerializer,CalibrateHandSerializer,ProfileSerializer
@@ -43,12 +43,80 @@ class RobotViewSet(viewsets.ModelViewSet):
     serializer_class = RobotSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = RobotPagination
+    
     def get_queryset(self):
         user = self.request.user
-        if user.is_superuser:
-            return Robot.objects.all()
-        return Robot.objects.filter(is_active=True)
-    
+
+        qs = Robot.objects.all()
+
+        # -------- Aggregations --------
+        return qs.annotate(
+            # Schedule summary
+            total_schedules=Count(
+                "schedules",
+                filter=Q(schedules__is_canceled=False),
+                distinct=True
+            ),
+            scheduled_count=Count(
+                "schedules",
+                filter=Q(
+                    schedules__status="scheduled",
+                    schedules__is_canceled=False
+                ),
+                distinct=True
+            ),
+            processing_count=Count(
+                "schedules",
+                filter=Q(
+                    schedules__status="processing",
+                    schedules__is_canceled=False
+                ),
+                distinct=True
+            ),
+            completed_count=Count(
+                "schedules",
+                filter=Q(
+                    schedules__status="completed",
+                    schedules__is_canceled=False
+                ),
+                distinct=True
+            ),
+
+            # Inspection summary
+            total_inspections=Count(
+                "schedules__inspections",
+                distinct=True
+            ),
+            total_defected=Count(
+                "schedules__inspections",
+                filter=Q(schedules__inspections__is_defect=True),
+                distinct=True
+            ),
+            total_non_defected=Count(
+                "schedules__inspections",
+                filter=Q(schedules__inspections__is_defect=False),
+                distinct=True
+            ),
+            approved_count=Count(
+                "schedules__inspections",
+                filter=Q(schedules__inspections__is_approved=True),
+                distinct=True
+            ),
+            human_verified_count=Count(
+                "schedules__inspections",
+                filter=Q(schedules__inspections__is_human_verified=True),
+                distinct=True
+            ),
+            pending_verification_count=Count(
+                "schedules__inspections",
+                filter=Q(
+                    schedules__inspections__is_human_verified=False,
+                    schedules__inspections__is_approved=False
+                ),
+                distinct=True
+            ),
+        )
+
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
 
@@ -70,7 +138,7 @@ class RobotViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK
         )
-
+    
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
 
