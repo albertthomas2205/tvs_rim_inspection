@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Robot,RobotMap,RobotLocation,RobotNavigation,CalibrateHand
+from .models import Robot,RobotMap,RobotLocation,RobotNavigation,CalibrateHand,Profile
 class RobotSerializer(serializers.ModelSerializer):
     class Meta:
         model = Robot
@@ -102,7 +102,7 @@ class CalibrateHandSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CalibrateHand
-        exclude = ("robot",)
+        fields = "__all__"
 
     def validate(self, data):
         """
@@ -130,3 +130,18 @@ class CalibrateHandSerializer(serializers.ModelSerializer):
                     })
 
         return data
+    
+
+
+class ProfileSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = Profile
+        fields = [
+            "id",
+            "name",
+            "is_active",
+            "created_at",
+            "updated_at"
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]

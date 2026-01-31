@@ -4,7 +4,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import RobotViewSet, RobotEventBroadcastAPIView,RobotMapDetailAPIView,RobotMapCreateUpdateAPIView,robot_location,RobotNavigationAPIView,CalibrateHandAPI
 from .views import EmergencyView, SpeakStartView, RobotViewSet
-
+from .views import *
 robot_list = RobotViewSet.as_view({
     'get': 'list',         # GET /robots/ → list all robots
     'post': 'create',      # POST /robots/ → create new robot
@@ -60,4 +60,65 @@ urlpatterns = [
         CalibrateHandAPI.as_view(),
         name="calibrate-hand"
     ),
+    path(
+        "robots/<int:robo_id>/calibration/left-hand/",
+        LeftHandActivationAPI.as_view()
+    ),
+    path(
+        "robots/<int:robo_id>/calibration/right-hand/",
+        RightHandActivationAPI.as_view()
+    ),
+
+
+
+
+
+    
+
+      # 1️⃣ Activate / Deactivate LEFT or RIGHT hand
+    path(
+        "robots/<int:robo_id>/calibration/hand/",
+        HandActivationAPI.as_view(),
+        name="hand-activation"
+    ),
+
+    # 2️⃣ Update calibration point (left/right, point_one/two/three)
+    path(
+        "robots/<int:robo_id>/calibration/point/",
+        HandPointAPI.as_view(),
+        name="hand-point-update"
+    ),
+
+    # 3️⃣ Get full calibration state (robot boot / UI refresh)
+    path(
+        "robots/<int:robo_id>/calibration/",
+        CalibrationDetailAPI.as_view(),
+        name="calibration-detail"
+    ),
+
+
+    path(
+        "robots/<int:robot_id>/profiles/",
+        ProfileListCreateAPI.as_view()
+    ),
+    path(
+        "robots/<int:robot_id>/profiles/<int:profile_id>/",
+        ProfileDetailAPI.as_view()
+    ),
+
+
+    # Calibration
+    path(
+        "robots/<int:robot_id>/profiles/<int:profile_id>/calibration/",
+        CalibrationDetailAPI.as_view()
+    ),
+    path(
+        "robots/<int:robot_id>/profiles/<int:profile_id>/calibration/hand/",
+        HandActivationAPI.as_view()
+    ),
+    path(
+        "robots/<int:robot_id>/profiles/<int:profile_id>/calibration/point/",
+        HandPointAPI.as_view()
+    ),
+
 ]

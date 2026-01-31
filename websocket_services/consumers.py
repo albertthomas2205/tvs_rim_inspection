@@ -70,62 +70,6 @@ class EmergencyStopConsumer(AsyncWebsocketConsumer):
 
 
 
-# class RobotMessageConsumer(AsyncWebsocketConsumer):
-
-#     async def connect(self):
-#         self.group_name = "robot_message_group"
-
-#         await self.channel_layer.group_add(
-#             self.group_name,
-#             self.channel_name
-#         )
-
-#         await self.accept()
-
-#         await self.send(text_data=json.dumps({
-#             "event": "connected",
-#             "message": "WebSocket connected"
-#         }))
-
-#     async def disconnect(self, close_code):
-#         await self.channel_layer.group_discard(
-#             self.group_name,
-#             self.channel_name
-#         )
-
-#     # 🔹 Client → Server
-#     async def receive(self, text_data):
-#         data = json.loads(text_data)
-
-#         event = data.get("event")
-#         payload = data.get("data", {})
-
-#         # ping-pong
-#         if event == "ping":
-#             await self.send(text_data=json.dumps({
-#                 "event": "pong"
-#             }))
-#             return
-
-#         # 🔥 Send to group (includes same client)
-#         await self.channel_layer.group_send(
-#             self.group_name,
-#             {
-#                 "type": "robot_message",  # MUST match method below
-#                 "event": event,
-#                 "data": payload
-#             }
-#         )
-
-#     # 🔹 Group → WebSocket (THIS IS REQUIRED)
-#     async def robot_message(self, event):
-#         await self.send(text_data=json.dumps({
-#             "event": event["event"],
-#             "data": event["data"]
-#         }))
-
-
-
 
 
 class RobotMessageConsumer(AsyncWebsocketConsumer):
@@ -201,3 +145,43 @@ class RobotMessageConsumer(AsyncWebsocketConsumer):
             is_active=True
         ).first()
 
+
+
+
+class RobotProfileMessageConsumer(AsyncWebsocketConsumer):
+
+    async def connect(self):
+        self.robo_id = self.scope["url_route"]["kwargs"]["robo_id"]
+        self.profile_id = self.scope["url_route"]["kwargs"]["profile_id"]
+
+        self.group_name = f"robot_profile_{self.robo_id}_{self.profile_id}"
+
+        await self.channel_layer.group_add(
+            self.group_name,
+            self.channel_name
+        )
+
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        await self.channel_layer.group_discard(
+            self.group_name,
+            self.channel_name
+        )
+
+    async def receive(self, text_data=None, bytes_data=None):
+        """
+        Optional: handle messages coming FROM robot/UI
+        """
+        if text_data:
+            data = json.loads(text_data)
+            # handle incoming messages if needed
+
+    async def robot_message(self, event):
+        """
+        Handle messages sent via group_send
+        """
+        await self.send(text_data=json.dumps({
+            "event": event.get("event"),
+            "data": event.get("data")
+        }))

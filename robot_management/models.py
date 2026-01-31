@@ -253,29 +253,63 @@ class RobotNavigation(models.Model):
         return f"{self.robot} - {self.navigation_mode}"
     
 
-class CalibrateHand(models.Model):
+class Profile(models.Model):
+    name = models.CharField(max_length=100,unique=True)
+
     robot = models.ForeignKey(
         "Robot",
         on_delete=models.CASCADE,
-        related_name="calibrate_hands"
+        related_name="profiles"
     )
 
-    # Hand status
-    left_hand_active = models.BooleanField(default=False)
-    right_hand_active = models.BooleanField(default=False)
-
-    # Left hand points (each is JSON)
-    left_point_one = models.JSONField(null=True, blank=True)
-    left_point_two = models.JSONField(null=True, blank=True)
-    left_point_three = models.JSONField(null=True, blank=True)
-
-    # Right hand points (each is JSON)
-    right_point_one = models.JSONField(null=True, blank=True)
-    right_point_two = models.JSONField(null=True, blank=True)
-    right_point_three = models.JSONField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"Hand Calibration - Robot {self.robot_id}"
+        return f"{self.name} - Robot {self.robot.robo_id}"
+
+    
+class CalibrateHand(models.Model):
+    profile = models.OneToOneField(
+        Profile,
+        on_delete=models.CASCADE,
+        related_name="calibration",
+        null=True,          # 👈 TEMP
+        blank=True          # 👈 TEMP
+        
+    )
+
+    # Calibration master switch
+    calibration_status = models.BooleanField(default=False)
+
+    # Hand status
+    left_hand_active = models.BooleanField(default=False)
+    right_hand_active = models.BooleanField(default=False)
+
+    # LEFT HAND POINTS
+    left_point_one = models.JSONField(null=True, blank=True)
+    left_point_one_active = models.BooleanField(default=False)
+
+    left_point_two = models.JSONField(null=True, blank=True)
+    left_point_two_active = models.BooleanField(default=False)
+
+    left_point_three = models.JSONField(null=True, blank=True)
+    left_point_three_active = models.BooleanField(default=False)
+
+    # RIGHT HAND POINTS
+    right_point_one = models.JSONField(null=True, blank=True)
+    right_point_one_active = models.BooleanField(default=False)
+
+    right_point_two = models.JSONField(null=True, blank=True)
+    right_point_two_active = models.BooleanField(default=False)
+
+    right_point_three = models.JSONField(null=True, blank=True)
+    right_point_three_active = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Calibration - Profile {self.profile_id}"

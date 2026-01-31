@@ -23,9 +23,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 
-from .models import RobotLocation,CalibrateHand
+from .models import RobotLocation,CalibrateHand,Profile
 from robot_management.models import Robot
-from .serializers import RobotLocationSerializer,EmergencySerializer,SpeakStartSerializer,CalibrateHandSerializer
+from .serializers import RobotLocationSerializer,EmergencySerializer,SpeakStartSerializer,CalibrateHandSerializer,ProfileSerializer
 
 from django.shortcuts import get_object_or_404
 
@@ -565,68 +565,231 @@ class SpeakStartView(APIView):
     
 
 
+def get_profile_calibration(robot_id, profile_id):
+    robot = get_object_or_404(Robot, id=robot_id)
+    profile = get_object_or_404(Profile, id=profile_id, robot=robot)
 
-class CalibrateHandAPI(APIView):
+    calibration, _ = CalibrateHand.objects.get_or_create(
+        profile=profile,
+        defaults={"robot": robot}
+    )
 
-    def get_object(self, robo_id):
-        robot = get_object_or_404(Robot, id=robo_id)
-        calibration, _ = CalibrateHand.objects.get_or_create(robot=robot)
-        return calibration
+    return robot, profile, calibration
 
-    def get(self, request, robo_id):
-        calibration = self.get_object(robo_id)
-        serializer = CalibrateHandSerializer(calibration)
+
+def broadcast_to_profile(robot, profile, event, data):
+    async_to_sync(get_channel_layer().group_send)(
+        f"robot_profile_{robot.robo_id}_{profile.id}",
+        {
+            "type": "robot_message",
+            "event": event,
+            "data": data
+        }
+    )
+
+class HandActivationAPI(APIView):
+
+    def patch(self, request, robot_id, profile_id):
+        robot, profile, calibration = get_profile_calibration(robot_id, profile_id)
+
+        # 🔒 Calibration check
+        if not calibration.calibration_status:
+            return Response(
+                {
+                    "status": False,
+                    "message": "Calibration is not active",
+                    "data": None
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        hand = request.data.get("hand")
+        active = request.data.get("active")
+
+        if hand not in ["left", "right"] or not isinstance(active, bool):
+            return Response(
+                {
+                    "status": False,
+                    "message": "hand must be 'left' or 'right' and active must be boolean",
+                    "data": None
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Update DB (UNCHANGED LOGIC)
+        if hand == "left":
+            calibration.left_hand_active = active
+            if not active:
+                calibration.left_point_one_active = False
+                calibration.left_point_two_active = False
+                calibration.left_point_three_active = False
+        else:
+            calibration.right_hand_active = active
+            if not active:
+                calibration.right_point_one_active = False
+                calibration.right_point_two_active = False
+                calibration.right_point_three_active = False
+
+        calibration.save()
+
+        
+        # 🔥 WebSocket broadcast
+        event_name = f"hand_{hand}_active"
+        payload = {"value": active}
+
+        broadcast_to_profile(robot, profile, event_name, payload)
         return Response(
-            {"status": True, "data": serializer.data},
+            {
+                "status": True,
+                "message": f"{hand.capitalize()} hand {'activated' if active else 'deactivated'} successfully",
+                "data": payload
+            },
             status=status.HTTP_200_OK
         )
 
-    def post(self, request, robo_id):
-        calibration = self.get_object(robo_id)
 
-        serializer = CalibrateHandSerializer(
-            calibration,
+class HandPointAPI(APIView):
+
+    def patch(self, request, robot_id, profile_id):
+        robot, profile, calibration = get_profile_calibration(robot_id, profile_id)
+
+        hand = request.data.get("hand")
+        point = request.data.get("point")
+        active = request.data.get("active")
+        data = request.data.get("data")
+
+        if hand not in ["left", "right"]:
+            return Response({"success": False, "message": "hand must be 'left' or 'right'", "data": None}, status=400)
+
+        if not calibration.calibration_status:
+            return Response({"success": False, "message": "Calibration is not active.", "data": None}, status=400)
+
+        if hand == "left" and not calibration.left_hand_active:
+            return Response({"success": False, "message": "Left hand is inactive.", "data": None}, status=400)
+        if hand == "right" and not calibration.right_hand_active:
+            return Response({"success": False, "message": "Right hand is inactive.", "data": None}, status=400)
+
+        field = f"{hand}_{point}"
+        active_field = f"{field}_active"
+
+        if not hasattr(calibration, active_field):
+            return Response({"success": False, "message": "Invalid point", "data": None}, status=400)
+
+        events = []
+
+        # Activate point
+        if active is True:
+            setattr(calibration, active_field, True)
+            calibration.save()
+
+            event_name = f"{field}_active"
+            broadcast_to_profile(robot, profile, event_name, {"value": True})
+            events.append({"event": event_name, "value": True})
+
+        if not getattr(calibration, active_field):
+            event_name = f"{field}_active"
+            broadcast_to_profile(robot, profile, event_name, {"value": False})
+            return Response({"success": False, "message": f"Point '{point}' is inactive.", "data": {"event": event_name, "value": False}}, status=400)
+
+        if data:
+            setattr(calibration, field, data)
+            calibration.save()
+
+            event_name = f"{field}_data"
+            broadcast_to_profile(robot, profile, event_name, {"value": True, "data": data})
+            events.append({"event": event_name, "value": True, "data": data})
+
+        return Response({"success": True, "message": f"Point '{point}' updated successfully", "data": events}, status=200)
+
+
+
+
+class CalibrationDetailAPI(APIView):
+
+    def get(self, request, robot_id, profile_id):
+        robot, profile, calibration = get_profile_calibration(robot_id, profile_id)
+
+        return Response(
+            {
+                "status": True,
+                "profile": {
+                    "id": profile.id,
+                    "name": profile.name
+                },
+                "data": CalibrateHandSerializer(calibration).data
+            },
+            status=200
+        )
+
+    def patch(self, request, robot_id, profile_id):
+        robot, profile, calibration = get_profile_calibration(robot_id, profile_id)
+
+        calibration_status = request.data.get("calibration_status")
+        if not isinstance(calibration_status, bool):
+            return Response({"status": False, "message": "calibration_status must be true or false"}, status=400)
+
+        calibration.calibration_status = calibration_status
+        calibration.save(update_fields=["calibration_status"])
+
+        event_name = "calibration_status"
+        broadcast_to_profile(robot, profile, event_name, {"value": calibration_status})
+
+        return Response({"status": True, "message": f"Calibration status set to {calibration_status}", 
+                         "data": {"event": event_name, "value": calibration_status}}, status=200)
+
+
+class ProfileListCreateAPI(APIView):
+
+    def get(self, request, robot_id):
+        robot = get_object_or_404(Robot, id=robot_id)
+        profiles = robot.profiles.all()
+
+        data = ProfileSerializer(profiles, many=True).data
+        return Response({"success": True, "data": data})
+
+    def post(self, request, robot_id):
+        robot = get_object_or_404(Robot, id=robot_id)
+
+        serializer = ProfileSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        profile = serializer.save(robot=robot)
+
+        # 🔥 Auto-create calibration
+        CalibrateHand.objects.create(profile=profile)
+
+        return Response(
+            {
+                "success": True,
+                "message": "Profile created successfully",
+                "data": serializer.data
+            },
+            status=201
+        )
+
+
+class ProfileDetailAPI(APIView):
+
+    def patch(self, request, robot_id, profile_id):
+        profile = get_object_or_404(
+            Profile,
+            id=profile_id,
+            robot_id=robot_id
+        )
+
+        serializer = ProfileSerializer(
+            profile,
             data=request.data,
             partial=True
         )
-
-        if serializer.is_valid():
-            serializer.save()
-            return Response(
-                {
-                    "status": True,
-                    "message": "Calibration saved successfully",
-                    "data": serializer.data
-                },
-                status=status.HTTP_200_OK
-            )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
 
         return Response(
-            {"status": False, "errors": serializer.errors},
-            status=status.HTTP_400_BAD_REQUEST
+            {
+                "success": True,
+                "message": "Profile updated successfully",
+                "data": serializer.data
+            }
         )
-
-    def patch(self, request, robo_id):
-        calibration = self.get_object(robo_id)
-
-        serializer = CalibrateHandSerializer(
-            calibration,
-            data=request.data,
-            partial=True
-        )
-
-        if serializer.is_valid():
-            serializer.save()
-            return Response(
-                {
-                    "status": True,
-                    "message": "Calibration updated successfully",
-                    "data": serializer.data
-                },
-                status=status.HTTP_200_OK
-            )
-
-        return Response(
-            {"status": False, "errors": serializer.errors},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+    
