@@ -116,3 +116,28 @@ class RimTypeSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = ["id", "created_at"]
+
+
+class ScheduleFilterSerializer(serializers.Serializer):
+    filter_type = serializers.ChoiceField(
+        choices=["day", "week", "month", "range"]
+    )
+    date = serializers.DateField(required=False)
+    start_date = serializers.DateField(required=False)
+    end_date = serializers.DateField(required=False)
+
+    def validate(self, data):
+        filter_type = data.get("filter_type")
+
+        if filter_type in ["day", "week", "month"] and not data.get("date"):
+            raise serializers.ValidationError(
+                {"date": "date is required for this filter type"}
+            )
+
+        if filter_type == "range":
+            if not data.get("start_date") or not data.get("end_date"):
+                raise serializers.ValidationError(
+                    {"date_range": "start_date and end_date are required"}
+                )
+
+        return data

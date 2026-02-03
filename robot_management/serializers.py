@@ -1,11 +1,17 @@
 from rest_framework import serializers
 from .models import Robot,RobotMap,RobotLocation,RobotNavigation,CalibrateHand,Profile
+from django.contrib.auth.models import User
 
 
+class AssignedUserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ["id", "username", "email"]
 
 class RobotSerializer(serializers.ModelSerializer):
     schedule_summary = serializers.SerializerMethodField()
     inspection_summary = serializers.SerializerMethodField()
+    assigned_users = serializers.SerializerMethodField()
 
     class Meta:
         model = Robot
@@ -32,6 +38,7 @@ class RobotSerializer(serializers.ModelSerializer):
             "updated_at",
             "created_by",
             "updated_by",
+            "assigned_users"
         ]
 
     def get_schedule_summary(self, obj):
@@ -51,6 +58,19 @@ class RobotSerializer(serializers.ModelSerializer):
             "human_verified": obj.human_verified_count,
             "pending_verification": obj.pending_verification_count,
         }
+    
+    def get_assigned_users(self, obj):
+        request = self.context.get("request")
+
+        # 🔐 Only superuser can see assigned users
+        if not request or not request.user.is_superuser:
+            return None
+
+        users = User.objects.filter(
+            assigned_robots__robot=obj
+        ).distinct()
+
+        return AssignedUserSerializer(users, many=True).data
 
 class RobotMapSerializer(serializers.ModelSerializer):
     uploaded_by = serializers.ReadOnlyField(source="uploaded_by.username")

@@ -72,14 +72,20 @@ urlpatterns = [
     ),
 
 
-    path(
-        "robots/<int:robot_id>/profiles/",
-        ProfileListCreateAPI.as_view()
-    ),
-    path(
-        "robots/<int:robot_id>/profiles/<int:profile_id>/",
-        ProfileDetailAPI.as_view()
-    ),
+    # path(
+    #     "robots/<int:robot_id>/profiles/",
+    #     ProfileListCreateAPI.as_view()
+    # ),
+    # path(
+    #     "robots/<int:robot_id>/profiles/<int:profile_id>/",
+    #     ProfileDetailAPI.as_view()
+    # ),
+
+    # List all profiles / Create
+    path('robots/<int:robot_id>/profiles/', ProfileListCreateAPI.as_view()),
+
+    # Retrieve / Patch / Delete single profile
+    path('robots/<int:robot_id>/profiles/<int:profile_id>/', ProfileListCreateAPI.as_view()),
 
 
     # Calibration
@@ -94,6 +100,12 @@ urlpatterns = [
     path(
         "robots/<int:robot_id>/profiles/<int:profile_id>/calibration/point/",
         HandPointAPI.as_view()
+    ),
+
+    path(
+        "robots/<int:robot_id>/profiles/<int:profile_id>/calibration/<str:action>/",
+        HandActionAPI.as_view(),
+        name="calibration-hand-action"
     ),
 
 ]

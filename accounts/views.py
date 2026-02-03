@@ -8,9 +8,12 @@ from django.utils.crypto import get_random_string
 from .serializers import RegisterSerializer
 from datetime import timedelta
 from django.utils import timezone
-from .models import UserProfile
+from .models import UserProfile,RobotUser
 from rest_framework.decorators import api_view, permission_classes
-from .serializers import UserListSerializer
+from .serializers import UserListSerializer,RobotUserAssignSerializer
+from robot_management.models import Robot
+from .serializers import *
+from rest_framework.pagination import PageNumberPagination
 # ------------------- Registration -------------------
 class RegisterAPIView(APIView):
     permission_classes = [AllowAny]
@@ -183,16 +186,28 @@ class ResetPasswordAPIView(APIView):
             "message": "Password reset successful"
         })
 
-
+class UserPagination(PageNumberPagination):
+    page_size = 8
+    page_size_query_param = "page_size"
+    max_page_size = 8
 
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsAdminUser])
 def list_users(request):
-    users = User.objects.select_related("profile").all()
-    serializer = UserListSerializer(users, many=True)
+    users = (
+        User.objects
+        .select_related("profile")
+        .prefetch_related("assigned_robots__robot")
+        .order_by("id")
+    )
 
-    return Response({
+    paginator = UserPagination()
+    page = paginator.paginate_queryset(users, request)
+
+    serializer = UserListSerializer(page, many=True)
+
+    return paginator.get_paginated_response({
         "success": True,
         "message": "Users retrieved successfully",
         "data": serializer.data
@@ -229,3 +244,115 @@ def update_user(request, user_id):
             "is_verified": profile.is_verified
         }
     })
+
+
+class AssignUsersToRobotView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def post(self, request):
+        serializer = RobotUserAssignSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        robot_id = serializer.validated_data["robot_id"]
+        user_ids = serializer.validated_data["user_ids"]
+
+        robot = Robot.objects.get(robo_id=robot_id)
+
+        assigned_users = []
+
+        for user_id in user_ids:
+            user = User.objects.get(id=user_id)
+
+            obj, created = RobotUser.objects.get_or_create(
+                robot=robot,
+                user=user,
+                defaults={"assigned_by": request.user}
+            )
+            assigned_users.append(user.username)
+
+        return Response({
+            "success": True,
+            "message": "Users assigned successfully",
+            "robot": robot.robo_id,
+            "users": assigned_users
+        }, status=status.HTTP_200_OK)
+    
+
+class RemoveUserFromRobot(APIView):
+    permission_classes = [IsAdminUser]
+
+    def post(self, request):
+        robot_id = request.data.get("robot_id")
+        user_id = request.data.get("user_id")
+
+        RobotUser.objects.filter(
+            robot__robo_id=robot_id,
+            user_id=user_id
+        ).delete()
+
+        return Response({
+            "success": True,
+            "message": "User removed from robot"
+        })
+
+class AssignRobotsToUserView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def post(self, request):
+        serializer = UserRobotAssignSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user_id = serializer.validated_data["user_id"]
+        robot_ids = serializer.validated_data["robot_ids"]
+
+        user = User.objects.get(id=user_id)
+        robots = Robot.objects.filter(robo_id__in=robot_ids)
+
+        assigned = []
+        already_assigned = []
+
+        for robot in robots:
+            obj, created = RobotUser.objects.get_or_create(
+                user=user,
+                robot=robot,
+                defaults={"assigned_by": request.user}
+            )
+            if created:
+                assigned.append(robot.robo_id)
+            else:
+                already_assigned.append(robot.robo_id)
+
+        return Response(
+            {
+                "success": True,
+                "message": "Robots assignment processed",
+                "user": user.username,
+                "assigned_robots": assigned,
+                "already_assigned": already_assigned
+            },
+            status=status.HTTP_200_OK
+        )
+
+class RemoveRobotsFromUserView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def post(self, request):
+        serializer = UserRobotAssignSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user_id = serializer.validated_data["user_id"]
+        robot_ids = serializer.validated_data["robot_ids"]
+
+        deleted, _ = RobotUser.objects.filter(
+            user_id=user_id,
+            robot__robo_id__in=robot_ids
+        ).delete()
+
+        return Response(
+            {
+                "success": True,
+                "message": "Robots removed from user",
+                "removed_count": deleted
+            },
+            status=status.HTTP_200_OK
+        )

@@ -47,7 +47,19 @@ class RobotViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
 
-        qs = Robot.objects.all()
+        if user.is_superuser:
+            qs = Robot.objects.all()
+        else:
+            qs = (
+                Robot.objects
+                .filter(
+                    is_active=True,
+                    assigned_users__user=user
+                )
+                .distinct()
+            )
+
+
 
         # -------- Aggregations --------
         return qs.annotate(
@@ -161,6 +173,20 @@ class RobotViewSet(viewsets.ModelViewSet):
             {"success": True, "message": "Robot deactivated"},
             status=status.HTTP_200_OK
         )
+    
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+
+        return Response(
+            {
+                "success": True,
+                "message": "Robot fetched successfully",
+                "data": serializer.data
+            },
+            status=status.HTTP_200_OK
+        )
+
 
     # ✅ Activate (PUT)
     @action(detail=True, methods=["put"])
@@ -179,6 +205,8 @@ class RobotViewSet(viewsets.ModelViewSet):
             {"success": True, "message": "Robot activated"},
             status=status.HTTP_200_OK
         )
+
+
 
 
 class RobotEventBroadcastAPIView(APIView):
@@ -470,10 +498,118 @@ def robot_location(request, robot_id):
     
 
 
+    # def patch(self, request, robot_id):
+    #     robot = get_object_or_404(Robot, id=robot_id)
+
+    #     navigation, created = RobotNavigation.objects.get_or_create(
+    #         robot=robot,
+    #         defaults={
+    #             "navigation_mode": "stationary",
+    #             "navigation_style": None
+    #         }
+    #     )
+
+    #     serializer = RobotNavigationUpdateSerializer(
+    #         navigation,
+    #         data=request.data,
+    #         partial=True
+    #     )
+
+    #     if serializer.is_valid():
+    #         serializer.save()
+    #         return Response({
+    #             "status": "success",
+    #             "created": created,
+    #             "data": serializer.data
+    #         })
+
+    #     return Response(
+    #         serializer.errors,
+    #         status=status.HTTP_400_BAD_REQUEST
+    #     )
+
+
+# class RobotNavigationAPIView(APIView):
+
+#     def get(self, request, robot_id):
+#         robot = get_object_or_404(Robot, id=robot_id)
+
+#         navigation, created = RobotNavigation.objects.get_or_create(
+#             robot=robot,
+#             defaults={
+#                 "navigation_mode": "stationary",
+#                 "navigation_style": None
+#             }
+#         )
+
+#         serializer = RobotNavigationUpdateSerializer(navigation)
+
+#         return Response({
+#             "status": "success",
+#             "created": created,
+#             "data": serializer.data
+#         })
+
+
+
+
+#     def patch(self, request, robot_id):
+#         try:
+#             robot = get_object_or_404(Robot, id=robot_id)
+#         except Robot.DoesNotExist:
+#             return Response(
+#                 {"success": False, "message": "Robot not found"},
+#                 status=status.HTTP_404_NOT_FOUND
+#             )
+
+#         navigation, _ = RobotNavigation.objects.get_or_create(robot=robot)
+
+#         navigation_mode = request.data.get("navigation_mode")
+#         navigation_style = request.data.get("navigation_style")
+
+#         navigation.navigation_mode = navigation_mode
+#         navigation.navigation_style = navigation_style
+#         navigation.save()  # validation runs here
+
+#         # 🔥 WebSocket event
+#         channel_layer = get_channel_layer()
+#         group_name = f"robot_message_{robot.robo_id}"
+
+#         event = "navigation_updated"
+#         data = {
+#             "robot_id": robot.robo_id,
+#             "navigation_mode": navigation.navigation_mode,
+#             "navigation_style": navigation.navigation_style,
+#         }
+
+#         async_to_sync(channel_layer.group_send)(
+#             group_name,
+#             {
+#                 "type": "robot_message",
+#                 "event": event,
+#                 "data": data
+#             }
+#         )
+
+#         return Response(
+#             {
+#                 "success": True,
+#                 "message": "Navigation updated successfully"
+#             },
+#             status=status.HTTP_200_OK
+#         )
+
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class RobotNavigationAPIView(APIView):
 
     def get(self, request, robot_id):
+        """
+        Retrieve the current navigation settings for a robot.
+        """
         robot = get_object_or_404(Robot, id=robot_id)
 
         navigation, created = RobotNavigation.objects.get_or_create(
@@ -493,35 +629,56 @@ class RobotNavigationAPIView(APIView):
         })
 
     def patch(self, request, robot_id):
-        robot = get_object_or_404(Robot, id=robot_id)
+        """
+        Update the navigation mode and style of a robot and broadcast
+        the changes to WebSocket clients connected to this robot's group.
+        """
+        try:
+            robot = get_object_or_404(Robot, id=robot_id)
+        except Robot.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Robot not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
-        navigation, created = RobotNavigation.objects.get_or_create(
-            robot=robot,
-            defaults={
-                "navigation_mode": "stationary",
-                "navigation_style": None
+        navigation, _ = RobotNavigation.objects.get_or_create(robot=robot)
+
+        navigation_mode = request.data.get("navigation_mode")
+        navigation_style = request.data.get("navigation_style")
+
+        navigation.navigation_mode = navigation_mode
+        navigation.navigation_style = navigation_style
+        navigation.save()  # triggers model validation
+
+        # 🔹 Broadcast to WebSocket
+        channel_layer = get_channel_layer()
+        group_name = f"robot_message_{robot.robo_id}"
+
+        data = {
+            "robot_id": robot.robo_id,
+            "navigation_mode": navigation.navigation_mode,
+            "navigation_style": navigation.navigation_style,
+        }
+
+        logger.info(f"[API] Sending navigation update to group: {group_name} -> {data}")
+
+        async_to_sync(channel_layer.group_send)(
+            group_name,
+            {
+                "type": "robot_message",  # must match consumer method
+                "event": "navigation_updated",
+                "data": data
             }
         )
 
-        serializer = RobotNavigationUpdateSerializer(
-            navigation,
-            data=request.data,
-            partial=True
-        )
-
-        if serializer.is_valid():
-            serializer.save()
-            return Response({
-                "status": "success",
-                "created": created,
-                "data": serializer.data
-            })
-
         return Response(
-            serializer.errors,
-            status=status.HTTP_400_BAD_REQUEST
+            {
+                "success": True,
+                "message": "Navigation updated successfully",
+                "data": data
+            },
+            status=status.HTTP_200_OK
         )
-    
 
 
 
@@ -716,6 +873,8 @@ class HandActivationAPI(APIView):
         )
 
 
+
+
 class HandPointAPI(APIView):
 
     def patch(self, request, robot_id, profile_id):
@@ -723,52 +882,103 @@ class HandPointAPI(APIView):
 
         hand = request.data.get("hand")
         point = request.data.get("point")
-        active = request.data.get("active")
-        data = request.data.get("data")
+        active = request.data.get("active", None)
+        data = request.data.get("data", None)
 
+        # -------- Validation --------
         if hand not in ["left", "right"]:
-            return Response({"success": False, "message": "hand must be 'left' or 'right'", "data": None}, status=400)
+            return Response(
+                {"success": False, "message": "hand must be 'left' or 'right'", "data": None},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         if not calibration.calibration_status:
-            return Response({"success": False, "message": "Calibration is not active.", "data": None}, status=400)
+            return Response(
+                {"success": False, "message": "Calibration is not active.", "data": None},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         if hand == "left" and not calibration.left_hand_active:
-            return Response({"success": False, "message": "Left hand is inactive.", "data": None}, status=400)
+            return Response(
+                {"success": False, "message": "Left hand is inactive.", "data": None},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         if hand == "right" and not calibration.right_hand_active:
-            return Response({"success": False, "message": "Right hand is inactive.", "data": None}, status=400)
+            return Response(
+                {"success": False, "message": "Right hand is inactive.", "data": None},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         field = f"{hand}_{point}"
         active_field = f"{field}_active"
 
         if not hasattr(calibration, active_field):
-            return Response({"success": False, "message": "Invalid point", "data": None}, status=400)
+            return Response(
+                {"success": False, "message": "Invalid point", "data": None},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         events = []
 
-        # Activate point
+        # -------- Deactivate point --------
+        if active is False:
+            setattr(calibration, active_field, False)
+            calibration.save(update_fields=[active_field])
+
+            event_name = f"{field}_active"
+            broadcast_to_profile(robot, profile, event_name, {"value": False})
+            events.append({"event": event_name, "value": False})
+
+            return Response(
+                {
+                    "success": True,
+                    "message": f"Point '{point}' deactivated successfully",
+                    "data": events
+                },
+                status=status.HTTP_200_OK
+            )
+
+        # -------- Activate point --------
         if active is True:
             setattr(calibration, active_field, True)
-            calibration.save()
+            calibration.save(update_fields=[active_field])
 
             event_name = f"{field}_active"
             broadcast_to_profile(robot, profile, event_name, {"value": True})
             events.append({"event": event_name, "value": True})
 
-        if not getattr(calibration, active_field):
+        # -------- Check active before data update --------
+        if data is not None and not getattr(calibration, active_field):
             event_name = f"{field}_active"
             broadcast_to_profile(robot, profile, event_name, {"value": False})
-            return Response({"success": False, "message": f"Point '{point}' is inactive.", "data": {"event": event_name, "value": False}}, status=400)
 
-        if data:
+            return Response(
+                {
+                    "success": False,
+                    "message": f"Point '{point}' is inactive.",
+                    "data": {"event": event_name, "value": False}
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # -------- Update point data --------
+        if data is not None:
             setattr(calibration, field, data)
-            calibration.save()
+            calibration.save(update_fields=[field])
 
             event_name = f"{field}_data"
             broadcast_to_profile(robot, profile, event_name, {"value": True, "data": data})
             events.append({"event": event_name, "value": True, "data": data})
 
-        return Response({"success": True, "message": f"Point '{point}' updated successfully", "data": events}, status=200)
-
+        return Response(
+            {
+                "success": True,
+                "message": f"Point '{point}' updated successfully",
+                "data": events
+            },
+            status=status.HTTP_200_OK
+        )
 
 
 
@@ -806,35 +1016,65 @@ class CalibrationDetailAPI(APIView):
                          "data": {"event": event_name, "value": calibration_status}}, status=200)
 
 
+
+
+
 class ProfileListCreateAPI(APIView):
 
-    def get(self, request, robot_id):
+    # GET: list all profiles for a robot
+    def get(self, request, robot_id, profile_id=None):
         robot = get_object_or_404(Robot, id=robot_id)
-        profiles = robot.profiles.all()
 
-        data = ProfileSerializer(profiles, many=True).data
-        return Response({"success": True, "data": data})
+        if profile_id:
+            # Retrieve single profile
+            profile = get_object_or_404(Profile, id=profile_id, robot=robot)
+            data = ProfileSerializer(profile).data
+        else:
+            # List all profiles
+            profiles = robot.profiles.all()
+            data = ProfileSerializer(profiles, many=True).data
 
+        return Response({"success": True, "data": data}, status=status.HTTP_200_OK)
+
+    # POST: create a new profile for a robot
     def post(self, request, robot_id):
         robot = get_object_or_404(Robot, id=robot_id)
-
         serializer = ProfileSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
         profile = serializer.save(robot=robot)
 
-        # 🔥 Auto-create calibration
+        # Auto-create calibration
         CalibrateHand.objects.create(profile=profile)
 
         return Response(
-            {
-                "success": True,
-                "message": "Profile created successfully",
-                "data": serializer.data
-            },
-            status=201
+            {"success": True, "message": "Profile created successfully", "data": serializer.data},
+            status=status.HTTP_201_CREATED
         )
 
+    # PATCH: update a single profile
+    def patch(self, request, robot_id, profile_id):
+        robot = get_object_or_404(Robot, id=robot_id)
+        profile = get_object_or_404(Profile, id=profile_id, robot=robot)
+
+        serializer = ProfileSerializer(profile, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response(
+            {"success": True, "message": "Profile updated successfully", "data": serializer.data},
+            status=status.HTTP_200_OK
+        )
+
+    # DELETE: delete a single profile
+    def delete(self, request, robot_id, profile_id):
+        robot = get_object_or_404(Robot, id=robot_id)
+        profile = get_object_or_404(Profile, id=profile_id, robot=robot)
+        profile.delete()
+
+        return Response(
+            {"success": True, "message": "Profile deleted successfully"},
+            status=status.HTTP_204_NO_CONTENT
+        )
 
 class ProfileDetailAPI(APIView):
 
@@ -861,3 +1101,75 @@ class ProfileDetailAPI(APIView):
             }
         )
     
+
+
+class HandActionAPI(APIView):
+
+    def patch(self, request, robot_id, profile_id, action):
+        hand = request.data.get("hand")
+
+        if hand not in ["left", "right"]:
+            return Response(
+                {"success": False, "message": "hand must be left or right"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if action not in ["test", "retry", "update"]:
+            return Response(
+                {"success": False, "message": "Invalid action"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        profile = get_object_or_404(
+            Profile,
+            id=profile_id,
+            robot_id=robot_id
+        )
+
+        robot = profile.robot
+        calibration = profile.calibration
+
+        prefix = f"{hand}_hand"
+
+        # 🔄 Reset all hand flags
+        setattr(calibration, f"{prefix}_test", False)
+        setattr(calibration, f"{prefix}_retry", False)
+        setattr(calibration, f"{prefix}_update", False)
+
+        # ✅ Apply current action
+        setattr(calibration, f"{prefix}_{action}", True)
+
+        # 🔁 RETRY → clear point data
+        if action == "retry":
+            for point in ["one", "two", "three"]:
+                setattr(calibration, f"{hand}_point_{point}", None)
+                setattr(calibration, f"{hand}_point_{point}_active", False)
+
+        calibration.save()
+
+        # 📡 BROADCAST TO ROBOT + PROFILE
+        broadcast_to_profile(
+            robot=robot,
+            profile=profile,
+            event="CALIBRATION_HAND_ACTION",
+            data={
+                "profile_id": profile.id,
+                "hand": hand,
+                "action": action,
+                "calibration_status": {
+                    "test": getattr(calibration, f"{prefix}_test"),
+                    "retry": getattr(calibration, f"{prefix}_retry"),
+                    "update": getattr(calibration, f"{prefix}_update"),
+                }
+            }
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": f"{hand.capitalize()} hand {action} triggered",
+            },
+            status=status.HTTP_200_OK
+        )
+
+

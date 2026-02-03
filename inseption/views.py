@@ -9,7 +9,7 @@ from django.utils import timezone
 from datetime import datetime, timedelta
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from .models import Schedule, Inspection,SpeakConfig
-from .serializers import ScheduleSerializer, InspectionSerializer,InspectionHumanVerifySerializer,ScheduleDateFilterSerializer
+from .serializers import ScheduleSerializer, InspectionSerializer,InspectionHumanVerifySerializer,ScheduleFilterSerializer
 from .tasks import set_status_processing, set_status_completed
 from .serializers import ScheduleDateRangeFilterSerializer
 from drf_yasg.utils import swagger_auto_schema
@@ -784,31 +784,111 @@ class EmergencyStopAPIView(APIView):
         })
 
 
+class EightPerPagePagination(PageNumberPagination):
+    page_size = 8
+    page_size_query_param = "page_size"
+    max_page_size = 8
 
-class ScheduleFilterByDateRangeView(APIView):
+   
+
+class ScheduleFilterView(APIView):
     permission_classes = [AllowAny]
+    pagination_class = EightPerPagePagination
 
     def post(self, request, robot_id):
-        serializer = ScheduleDateRangeFilterSerializer(data=request.data)
+        serializer = ScheduleFilterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        start_date = serializer.validated_data["start_date"]
-        end_date = serializer.validated_data["end_date"]
+        filter_type = serializer.validated_data["filter_type"]
 
-        schedules = Schedule.objects.filter(
-            robot_id=robot_id,              # ✅ robot filter
-            scheduled_date__range=(start_date, end_date),
+        qs = Schedule.objects.filter(
+            robot_id=robot_id,
             is_canceled=False
-        ).order_by("scheduled_date", "scheduled_time")
+        )
 
-        return Response({
-            "success": True,
-            "message": "Schedules retrieved successfully",
-            "robot_id": robot_id,
-            "count": schedules.count(),
-            "schedules": ScheduleSerializer(schedules, many=True).data
-        }, status=status.HTTP_200_OK)
+        # -------- Date filters --------
+        if filter_type == "day":
+            date = serializer.validated_data["date"]
+            qs = qs.filter(scheduled_date=date)
 
+        elif filter_type == "week":
+            date = serializer.validated_data["date"]
+            start_date = date - timedelta(days=date.weekday())
+            end_date = start_date + timedelta(days=6)
+            qs = qs.filter(scheduled_date__range=(start_date, end_date))
+
+        elif filter_type == "month":
+            date = serializer.validated_data["date"]
+            qs = qs.filter(
+                scheduled_date__year=date.year,
+                scheduled_date__month=date.month
+            )
+
+        elif filter_type == "range":
+            qs = qs.filter(
+                scheduled_date__range=(
+                    serializer.validated_data["start_date"],
+                    serializer.validated_data["end_date"]
+                )
+            )
+
+        qs = qs.order_by("scheduled_date", "scheduled_time")
+
+        # -------- Schedule Summary (FULL DATA) --------
+        schedule_summary = qs.aggregate(
+            total=Count("id"),
+            scheduled=Count("id", filter=Q(status="scheduled")),
+            processing=Count("id", filter=Q(status="processing")),
+            completed=Count("id", filter=Q(status="completed")),
+        )
+
+        # -------- Inspection Summary (FULL DATA) --------
+        inspection_summary = qs.aggregate(
+            total=Count("inspections", distinct=True),
+            defected=Count("inspections", filter=Q(inspections__is_defect=True), distinct=True),
+            non_defected=Count("inspections", filter=Q(inspections__is_defect=False), distinct=True),
+            approved=Count("inspections", filter=Q(inspections__is_approved=True), distinct=True),
+            human_verified=Count("inspections", filter=Q(inspections__is_human_verified=True), distinct=True),
+            pending_verification=Count(
+                "inspections",
+                filter=Q(
+                    inspections__is_human_verified=False,
+                    inspections__is_approved=False
+                ),
+                distinct=True
+            ),
+        )
+
+        # -------- Pagination ONLY for schedules --------
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(qs, request)
+
+        return Response(
+            {
+                "success": True,
+                "message": "Robot schedule & inspection summary fetched",
+                "robot_id": robot_id,
+                "filter_type": filter_type,
+
+                "schedule_summary": schedule_summary,
+                "inspection_summary": inspection_summary,
+
+                # 👇 paginated schedules
+                "schedules": ScheduleSerializer(page, many=True).data,
+
+                # 👇 pagination info (extra, no breaking change)
+                "pagination": {
+                    "current_page": paginator.page.number,
+                    "total_pages": paginator.page.paginator.num_pages,
+                    "total_records": paginator.page.paginator.count,
+                    "page_size": paginator.page_size,
+                    "has_next": paginator.page.has_next(),
+                    "has_previous": paginator.page.has_previous(),
+                }
+            },
+            status=status.HTTP_200_OK
+        )
+    
 
 class RobotInspectionStatsView(APIView):
     permission_classes = [IsAuthenticated]

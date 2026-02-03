@@ -308,8 +308,20 @@ class CalibrateHand(models.Model):
     right_point_three = models.JSONField(null=True, blank=True)
     right_point_three_active = models.BooleanField(default=False)
 
+
+    # LEFT HAND
+    left_hand_test = models.BooleanField(default=False)
+    left_hand_retry = models.BooleanField(default=False)
+    left_hand_update = models.BooleanField(default=False)
+
+    # RIGHT HAND
+    right_hand_test = models.BooleanField(default=False)
+    right_hand_retry = models.BooleanField(default=False)
+    right_hand_update = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
 
     def __str__(self):
         return f"Calibration - Profile {self.profile_id}"
