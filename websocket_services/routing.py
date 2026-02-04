@@ -12,9 +12,9 @@ websocket_urlpatterns = [
         RobotMessageConsumer.as_asgi()
     ),
 
-    re_path(
-    r"ws/robot_message/(?P<robo_id>[\w-]+)/profile/(?P<profile_id>\d+)/$",
-    RobotProfileMessageConsumer.as_asgi()
-),
+     re_path(
+        r"ws/robot_message/(?P<robo_id>[\w-]+)/profile/$",
+        RobotProfileMessageConsumer.as_asgi()
+    ),
 
 ]

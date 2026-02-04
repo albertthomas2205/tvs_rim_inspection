@@ -188,15 +188,82 @@ class RobotMessageConsumer(AsyncWebsocketConsumer):
 
 
 
+# class RobotProfileMessageConsumer(AsyncWebsocketConsumer):
+
+#     async def connect(self):
+#         # URL params
+#         self.robo_id = self.scope["url_route"]["kwargs"]["robo_id"]
+#         self.profile_id = self.scope["url_route"]["kwargs"]["profile_id"]
+
+#         # Group name
+#         self.group_name = f"robot_profile_{self.robo_id}_{self.profile_id}"
+
+#         # Join group
+#         await self.channel_layer.group_add(
+#             self.group_name,
+#             self.channel_name
+#         )
+
+#         await self.accept()
+
+#         # ✅ Optional: notify client on connect
+#         await self.send(text_data=json.dumps({
+#             "event": "CONNECTED",
+#             "data": {
+#                 "robo_id": self.robo_id,
+#                 "profile_id": self.profile_id
+#             }
+#         }))
+
+#     async def disconnect(self, close_code):
+#         await self.channel_layer.group_discard(
+#             self.group_name,
+#             self.channel_name
+#         )
+
+#     async def receive(self, text_data=None, bytes_data=None):
+#         """
+#         Handle messages coming FROM Postman / Robot
+#         """
+#         if not text_data:
+#             return
+
+#         payload = json.loads(text_data)
+
+#         event = payload.get("event")
+#         data = payload.get("data", {})
+
+
+
+#         # 📡 Broadcast message to group (robot + UI + Postman)
+#         await self.channel_layer.group_send(
+#             self.group_name,
+#             {
+#                 "type": "robot_message",
+#                 "event": event,
+#                 "data": data,
+#             }
+#         )
+
+#     async def robot_message(self, event):
+#         """
+#         Handle messages sent via group_send (backend → websocket)
+#         """
+#         await self.send(text_data=json.dumps({
+#             "event": event.get("event"),
+#             "data": event.get("data")
+#         }))
+
+
+
 class RobotProfileMessageConsumer(AsyncWebsocketConsumer):
 
     async def connect(self):
-        # URL params
+        # URL param
         self.robo_id = self.scope["url_route"]["kwargs"]["robo_id"]
-        self.profile_id = self.scope["url_route"]["kwargs"]["profile_id"]
 
-        # Group name
-        self.group_name = f"robot_profile_{self.robo_id}_{self.profile_id}"
+        # Group name (profile_id removed)
+        self.group_name = f"robot_profile_{self.robo_id}"
 
         # Join group
         await self.channel_layer.group_add(
@@ -206,12 +273,11 @@ class RobotProfileMessageConsumer(AsyncWebsocketConsumer):
 
         await self.accept()
 
-        # ✅ Optional: notify client on connect
+        # Optional: notify client on connect
         await self.send(text_data=json.dumps({
             "event": "CONNECTED",
             "data": {
-                "robo_id": self.robo_id,
-                "profile_id": self.profile_id
+                "robo_id": self.robo_id
             }
         }))
 
@@ -223,7 +289,7 @@ class RobotProfileMessageConsumer(AsyncWebsocketConsumer):
 
     async def receive(self, text_data=None, bytes_data=None):
         """
-        Handle messages coming FROM Postman / Robot
+        Handle messages coming FROM Robot / Postman
         """
         if not text_data:
             return
@@ -233,9 +299,7 @@ class RobotProfileMessageConsumer(AsyncWebsocketConsumer):
         event = payload.get("event")
         data = payload.get("data", {})
 
-
-
-        # 📡 Broadcast message to group (robot + UI + Postman)
+        # Broadcast message to group
         await self.channel_layer.group_send(
             self.group_name,
             {

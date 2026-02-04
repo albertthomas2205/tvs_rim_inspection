@@ -551,8 +551,6 @@ def robot_location(request, robot_id):
 #         })
 
 
-
-
 #     def patch(self, request, robot_id):
 #         try:
 #             robot = get_object_or_404(Robot, id=robot_id)
@@ -598,6 +596,8 @@ def robot_location(request, robot_id):
 #             },
 #             status=status.HTTP_200_OK
 #         )
+
+
 
 import logging
 
@@ -802,9 +802,10 @@ def get_profile_calibration(robot_id, profile_id):
     return robot, profile, calibration
 
 
-def broadcast_to_profile(robot, profile, event, data):
+
+def broadcast_to_profile(robot, event, data):
     async_to_sync(get_channel_layer().group_send)(
-        f"robot_profile_{robot.robo_id}_{profile.id}",
+        f"robot_profile_{robot.robo_id}",
         {
             "type": "robot_message",
             "event": event,
@@ -860,9 +861,9 @@ class HandActivationAPI(APIView):
         
         # 🔥 WebSocket broadcast
         event_name = f"hand_{hand}_active"
-        payload = {"value": active}
+        payload = {"value": active,"profile_id": profile_id}
 
-        broadcast_to_profile(robot, profile, event_name, payload)
+        broadcast_to_profile(robot,event_name, payload)
         return Response(
             {
                 "status": True,
@@ -927,7 +928,7 @@ class HandPointAPI(APIView):
             calibration.save(update_fields=[active_field])
 
             event_name = f"{field}_active"
-            broadcast_to_profile(robot, profile, event_name, {"value": False})
+            broadcast_to_profile(robot, event_name, {"value": False})
             events.append({"event": event_name, "value": False})
 
             return Response(
@@ -945,13 +946,13 @@ class HandPointAPI(APIView):
             calibration.save(update_fields=[active_field])
 
             event_name = f"{field}_active"
-            broadcast_to_profile(robot, profile, event_name, {"value": True})
+            broadcast_to_profile(robot, profile, event_name, {"value": True,"profile_id":profile_id})
             events.append({"event": event_name, "value": True})
 
         # -------- Check active before data update --------
         if data is not None and not getattr(calibration, active_field):
             event_name = f"{field}_active"
-            broadcast_to_profile(robot, profile, event_name, {"value": False})
+            broadcast_to_profile(robot, event_name, {"value": False,"profile_id":profile_id})
 
             return Response(
                 {
@@ -968,7 +969,7 @@ class HandPointAPI(APIView):
             calibration.save(update_fields=[field])
 
             event_name = f"{field}_data"
-            broadcast_to_profile(robot, profile, event_name, {"value": True, "data": data})
+            broadcast_to_profile(robot, event_name, {"value": True, "data": data})
             events.append({"event": event_name, "value": True, "data": data})
 
         return Response(
@@ -1010,11 +1011,10 @@ class CalibrationDetailAPI(APIView):
         calibration.save(update_fields=["calibration_status"])
 
         event_name = "calibration_status"
-        broadcast_to_profile(robot, profile, event_name, {"value": calibration_status})
+        broadcast_to_profile(robot, event_name, {"value": calibration_status,"profile_id":profile_id})
 
         return Response({"status": True, "message": f"Calibration status set to {calibration_status}", 
                          "data": {"event": event_name, "value": calibration_status}}, status=200)
-
 
 
 
@@ -1102,7 +1102,6 @@ class ProfileDetailAPI(APIView):
         )
     
 
-
 class HandActionAPI(APIView):
 
     def patch(self, request, robot_id, profile_id, action):
@@ -1150,7 +1149,6 @@ class HandActionAPI(APIView):
         # 📡 BROADCAST TO ROBOT + PROFILE
         broadcast_to_profile(
             robot=robot,
-            profile=profile,
             event="CALIBRATION_HAND_ACTION",
             data={
                 "profile_id": profile.id,
@@ -1171,5 +1169,4 @@ class HandActionAPI(APIView):
             },
             status=status.HTTP_200_OK
         )
-
-
+    
