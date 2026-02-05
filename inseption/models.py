@@ -28,13 +28,13 @@ class Schedule(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="scheduled")
     created_at = models.DateTimeField(auto_now_add=True)
 
-    def save(self, *args, **kwargs):
-        # Auto set end_time = scheduled_time + 1 hour
-        if self.scheduled_time and not self.end_time:
-            dt = datetime.combine(self.scheduled_date, self.scheduled_time)
-            self.end_time = (dt + timedelta(hours=1)).time()
+    # def save(self, *args, **kwargs):
+    #     # Auto set end_time = scheduled_time + 1 hour
+    #     if self.scheduled_time and not self.end_time:
+    #         dt = datetime.combine(self.scheduled_date, self.scheduled_time)
+    #         self.end_time = (dt + timedelta(hours=1)).time()
 
-        super().save(*args, **kwargs)
+    #     super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Schedule {self.id} at {self.location}"

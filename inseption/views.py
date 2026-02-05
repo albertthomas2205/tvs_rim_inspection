@@ -18,6 +18,9 @@ from rest_framework.generics import ListCreateAPIView,UpdateAPIView
 from .utilities import save_false_detection_image
 from rest_framework.permissions import AllowAny,IsAuthenticated,IsAdminUser
 from rest_framework.exceptions import ValidationError
+from rest_framework.generics import GenericAPIView
+from django.db.models import Case, When, IntegerField
+from django.db.models import Value
 # Import Channels
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
@@ -75,6 +78,114 @@ class SchedulePagination(PageNumberPagination):
 )
 
 
+# @api_view(["POST"])
+# def create_schedule(request, robot_id):
+#     # ---- VALIDATE ROBOT ----
+#     try:
+#         robot = Robot.objects.get(id=robot_id, is_active=True)
+#     except Robot.DoesNotExist:
+#         return Response(
+#             {
+#                 "status": 404,
+#                 "message": "Robot not found",
+#                 "success": False,
+#             },
+#             status=status.HTTP_404_NOT_FOUND
+#         )
+
+#     location = request.data.get("location")
+#     date = request.data.get("scheduled_date")
+#     time = request.data.get("scheduled_time")
+
+#     # ---- REQUIRED FIELD VALIDATION ----
+#     missing_fields = []
+#     if not location:
+#         missing_fields.append("location")
+#     if not date:
+#         missing_fields.append("scheduled_date")
+#     if not time:
+#         missing_fields.append("scheduled_time")
+
+#     if missing_fields:
+#         return Response(
+#             {
+#                 "status": 400,
+#                 "message": f"Missing required fields: {', '.join(missing_fields)}",
+#                 "success": False,
+#             },
+#             status=status.HTTP_400_BAD_REQUEST
+#         )
+
+#     # ---- TIME PARSING ----
+#     def parse_time(t):
+#         try:
+#             return datetime.strptime(t, "%H:%M").time()
+#         except ValueError:
+#             return datetime.strptime(t, "%H:%M:%S").time()
+
+#     scheduled_time = parse_time(time)
+#     scheduled_date = datetime.strptime(date, "%Y-%m-%d").date()
+
+#     # ---- COMPUTE 3-MINUTE END TIME ----
+#     new_start_dt = datetime.combine(scheduled_date, scheduled_time)
+#     new_end_dt = new_start_dt + timedelta(minutes=3)
+#     new_end_time = new_end_dt.time()
+
+#     # ---- OVERLAP CHECK (per robot + location) ----
+#     overlapping = Schedule.objects.filter(
+#         robot=robot,
+#         location=location,
+#         scheduled_date=scheduled_date,
+#         scheduled_time__lt=new_end_time,
+#         end_time__gt=scheduled_time,
+#         is_canceled=False
+#     ).exists()
+
+#     if overlapping:
+#         return Response(
+#             {
+#                 "status": 400,
+#                 "message": "Time slot already booked for this robot and location",
+#                 "success": False
+#             },
+#             status=status.HTTP_400_BAD_REQUEST,
+#         )
+
+#     # ---- SAVE SCHEDULE ----
+#     data = request.data.copy()
+#     data["end_time"] = new_end_time
+
+#     serializer = ScheduleSerializer(data=data)
+#     serializer.is_valid(raise_exception=True)
+
+#     schedule = serializer.save(
+#         robot=robot  # 🔥 ROBOT COMES FROM URL
+#     )
+
+#     # ---- CELERY TASKS ----
+#     start_datetime = timezone.make_aware(
+#         datetime.combine(schedule.scheduled_date, schedule.scheduled_time)
+#     )
+#     end_datetime = timezone.make_aware(
+#         datetime.combine(schedule.scheduled_date, schedule.end_time)
+#     )
+
+#     set_status_processing.apply_async(args=[schedule.id], eta=start_datetime)
+#     set_status_completed.apply_async(args=[schedule.id], eta=end_datetime)
+
+#     # ---- SUCCESS RESPONSE ----
+#     return Response(
+#         {
+#             "status": 201,
+#             "message": "Schedule created successfully",
+#             "success": True,
+#             "data": serializer.data
+#         },
+#         status=status.HTTP_201_CREATED
+#     )
+
+
+
 @api_view(["POST"])
 def create_schedule(request, robot_id):
     # ---- VALIDATE ROBOT ----
@@ -82,26 +193,25 @@ def create_schedule(request, robot_id):
         robot = Robot.objects.get(id=robot_id, is_active=True)
     except Robot.DoesNotExist:
         return Response(
-            {
-                "status": 404,
-                "message": "Robot not found",
-                "success": False,
-            },
+            {"status": 404, "message": "Robot not found", "success": False},
             status=status.HTTP_404_NOT_FOUND
         )
 
     location = request.data.get("location")
     date = request.data.get("scheduled_date")
-    time = request.data.get("scheduled_time")
+    start_time_raw = request.data.get("scheduled_time")
+    end_time_raw = request.data.get("end_time")
 
     # ---- REQUIRED FIELD VALIDATION ----
     missing_fields = []
-    if not location:
-        missing_fields.append("location")
-    if not date:
-        missing_fields.append("scheduled_date")
-    if not time:
-        missing_fields.append("scheduled_time")
+    for field, value in {
+        "location": location,
+        "scheduled_date": date,
+        "scheduled_time": start_time_raw,
+        "end_time": end_time_raw,
+    }.items():
+        if not value:
+            missing_fields.append(field)
 
     if missing_fields:
         return Response(
@@ -114,26 +224,42 @@ def create_schedule(request, robot_id):
         )
 
     # ---- TIME PARSING ----
-    def parse_time(t):
+    def parse_time(value):
         try:
-            return datetime.strptime(t, "%H:%M").time()
+            return datetime.strptime(value, "%H:%M").time()
         except ValueError:
-            return datetime.strptime(t, "%H:%M:%S").time()
+            return datetime.strptime(value, "%H:%M:%S").time()
 
-    scheduled_time = parse_time(time)
-    scheduled_date = datetime.strptime(date, "%Y-%m-%d").date()
+    try:
+        scheduled_time = parse_time(start_time_raw)
+        end_time = parse_time(end_time_raw)
+        scheduled_date = datetime.strptime(date, "%Y-%m-%d").date()
+    except ValueError:
+        return Response(
+            {
+                "status": 400,
+                "message": "Invalid date or time format",
+                "success": False,
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
-    # ---- COMPUTE 3-MINUTE END TIME ----
-    new_start_dt = datetime.combine(scheduled_date, scheduled_time)
-    new_end_dt = new_start_dt + timedelta(minutes=3)
-    new_end_time = new_end_dt.time()
+    # ---- TIME LOGIC VALIDATION ----
+    if end_time <= scheduled_time:
+        return Response(
+            {
+                "status": 400,
+                "message": "end_time must be greater than scheduled_time",
+                "success": False,
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
-    # ---- OVERLAP CHECK (per robot + location) ----
+    # ---- OVERLAP CHECK ----
     overlapping = Schedule.objects.filter(
         robot=robot,
-        location=location,
         scheduled_date=scheduled_date,
-        scheduled_time__lt=new_end_time,
+        scheduled_time__lt=end_time,
         end_time__gt=scheduled_time,
         is_canceled=False
     ).exists()
@@ -143,43 +269,140 @@ def create_schedule(request, robot_id):
             {
                 "status": 400,
                 "message": "Time slot already booked for this robot and location",
-                "success": False
+                "success": False,
             },
-            status=status.HTTP_400_BAD_REQUEST,
+            status=status.HTTP_400_BAD_REQUEST
         )
 
     # ---- SAVE SCHEDULE ----
-    data = request.data.copy()
-    data["end_time"] = new_end_time
-
-    serializer = ScheduleSerializer(data=data)
+    serializer = ScheduleSerializer(data={
+        "location": location,
+        "scheduled_date": scheduled_date,
+        "scheduled_time": scheduled_time,
+        "end_time": end_time,
+    })
     serializer.is_valid(raise_exception=True)
 
-    schedule = serializer.save(
-        robot=robot  # 🔥 ROBOT COMES FROM URL
-    )
+    schedule = serializer.save(robot=robot)
 
     # ---- CELERY TASKS ----
-    start_datetime = timezone.make_aware(
+    start_dt = timezone.make_aware(
         datetime.combine(schedule.scheduled_date, schedule.scheduled_time)
     )
-    end_datetime = timezone.make_aware(
+    end_dt = timezone.make_aware(
         datetime.combine(schedule.scheduled_date, schedule.end_time)
     )
 
-    set_status_processing.apply_async(args=[schedule.id], eta=start_datetime)
-    set_status_completed.apply_async(args=[schedule.id], eta=end_datetime)
+    set_status_processing.apply_async(args=[schedule.id], eta=start_dt)
+    set_status_completed.apply_async(args=[schedule.id], eta=end_dt)
 
-    # ---- SUCCESS RESPONSE ----
+    # ---- RESPONSE ----
     return Response(
         {
             "status": 201,
             "message": "Schedule created successfully",
             "success": True,
-            "data": serializer.data
+            "data": serializer.data,
         },
         status=status.HTTP_201_CREATED
     )
+
+
+# @api_view(["POST"])
+# def create_schedule_immediately(request, robot_id):
+#     # ---- VALIDATE ROBOT ----
+#     try:
+#         robot = Robot.objects.get(id=robot_id, is_active=True)
+#     except Robot.DoesNotExist:
+#         return Response(
+#             {
+#                 "status": 404,
+#                 "message": "Robot not found",
+#                 "success": False,
+#             },
+#             status=status.HTTP_404_NOT_FOUND
+#         )
+
+#     location = request.data.get("location")
+
+#     # ---- REQUIRED FIELD VALIDATION ----
+#     if not location:
+#         return Response(
+#             {
+#                 "status": 400,
+#                 "message": "Missing required field: location",
+#                 "success": False,
+#             },
+#             status=status.HTTP_400_BAD_REQUEST
+#         )
+
+#     # ---- CURRENT IST TIME ----
+#     now = timezone.localtime()
+#     rounded_now = now.replace(second=0, microsecond=0)
+
+#     scheduled_date = rounded_now.date()
+#     scheduled_time = rounded_now.time()
+
+#     # ---- END TIME = +3 minutes ----
+#     new_end_dt = rounded_now + timedelta(minutes=3)
+#     end_time = new_end_dt.replace(second=0, microsecond=0).time()
+
+#     # ---- OVERLAP CHECK (PER ROBOT) ----
+#     overlapping = Schedule.objects.filter(
+#         robot=robot,
+#         location=location,
+#         scheduled_date=scheduled_date,
+#         scheduled_time__lt=end_time,
+#         end_time__gt=scheduled_time,
+#         is_canceled=False
+#     ).exists()
+
+#     if overlapping:
+#         return Response(
+#             {
+#                 "status": 400,
+#                 "message": "A schedule already exists for this robot at this time.",
+#                 "success": False
+#             },
+#             status=status.HTTP_400_BAD_REQUEST,
+#         )
+
+#     # ---- SAVE SCHEDULE ----
+#     schedule = Schedule.objects.create(
+#         robot=robot,                 # 🔥 FROM URL
+#         location=location,
+#         scheduled_date=scheduled_date,
+#         scheduled_time=scheduled_time,
+#         end_time=end_time,
+#         status="processing"
+#     )
+
+#     # ---- CELERY TASKS ----
+#     start_datetime = rounded_now
+#     end_datetime = new_end_dt
+
+#     set_status_processing.apply_async(args=[schedule.id], eta=start_datetime)
+#     set_status_completed.apply_async(args=[schedule.id], eta=end_datetime)
+
+#     # ---- RESPONSE ----
+#     return Response(
+#         {
+#             "status": 201,
+#             "message": "Schedule created and started immediately",
+#             "success": True,
+#             "data": {
+#                 "id": schedule.id,
+#                 "robot_id": robot.id,
+#                 "location": schedule.location,
+#                 "scheduled_date": str(schedule.scheduled_date),
+#                 "scheduled_time": str(schedule.scheduled_time),
+#                 "end_time": str(schedule.end_time),
+#                 "status": schedule.status
+#             }
+#         },
+#         status=status.HTTP_201_CREATED
+#     )
+
 
 
 @api_view(["POST"])
@@ -198,13 +421,14 @@ def create_schedule_immediately(request, robot_id):
         )
 
     location = request.data.get("location")
+    end_time_input = request.data.get("end_time")   # 🔥 TAKE FROM POST
 
     # ---- REQUIRED FIELD VALIDATION ----
-    if not location:
+    if not location or not end_time_input:
         return Response(
             {
                 "status": 400,
-                "message": "Missing required field: location",
+                "message": "Missing required fields: location and end_time",
                 "success": False,
             },
             status=status.HTTP_400_BAD_REQUEST
@@ -215,13 +439,33 @@ def create_schedule_immediately(request, robot_id):
     rounded_now = now.replace(second=0, microsecond=0)
 
     scheduled_date = rounded_now.date()
-    scheduled_time = rounded_now.time()
+    scheduled_time = rounded_now.time()   # 🔥 START TIME = CURRENT TIME
 
-    # ---- END TIME = +3 minutes ----
-    new_end_dt = rounded_now + timedelta(minutes=3)
-    end_time = new_end_dt.replace(second=0, microsecond=0).time()
+    # ---- CONVERT END TIME ----
+    try:
+        end_time = datetime.strptime(end_time_input, "%H:%M").time()
+    except ValueError:
+        return Response(
+            {
+                "status": 400,
+                "message": "Invalid end_time format. Use HH:MM",
+                "success": False
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
-    # ---- OVERLAP CHECK (PER ROBOT) ----
+    # ---- VALIDATE END TIME > START TIME ----
+    if end_time <= scheduled_time:
+        return Response(
+            {
+                "status": 400,
+                "message": "end_time must be greater than current time",
+                "success": False
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # ---- OVERLAP CHECK ----
     overlapping = Schedule.objects.filter(
         robot=robot,
         location=location,
@@ -243,7 +487,7 @@ def create_schedule_immediately(request, robot_id):
 
     # ---- SAVE SCHEDULE ----
     schedule = Schedule.objects.create(
-        robot=robot,                 # 🔥 FROM URL
+        robot=robot,
         location=location,
         scheduled_date=scheduled_date,
         scheduled_time=scheduled_time,
@@ -251,11 +495,10 @@ def create_schedule_immediately(request, robot_id):
         status="processing"
     )
 
-    # ---- CELERY TASKS ----
-    start_datetime = rounded_now
-    end_datetime = new_end_dt
+    # ---- CELERY TASK ----
+    end_datetime = datetime.combine(scheduled_date, end_time)
+    end_datetime = timezone.make_aware(end_datetime)
 
-    set_status_processing.apply_async(args=[schedule.id], eta=start_datetime)
     set_status_completed.apply_async(args=[schedule.id], eta=end_datetime)
 
     # ---- RESPONSE ----
@@ -791,12 +1034,117 @@ class EightPerPagePagination(PageNumberPagination):
 
    
 
-class ScheduleFilterView(APIView):
+
+# class ScheduleFilterView(GenericAPIView):
+#     permission_classes = [AllowAny]
+#     serializer_class = ScheduleFilterSerializer
+#     pagination_class = EightPerPagePagination
+
+#     def post(self, request, robot_id):
+#         serializer = self.get_serializer(data=request.data)
+#         serializer.is_valid(raise_exception=True)
+
+#         filter_type = serializer.validated_data["filter_type"]
+
+#         qs = Schedule.objects.filter(
+#             robot_id=robot_id,
+#             is_canceled=False
+#         )
+
+#         # -------- Date filters --------
+#         if filter_type == "day":
+#             date = serializer.validated_data["date"]
+#             qs = qs.filter(scheduled_date=date)
+
+#         elif filter_type == "week":
+#             date = serializer.validated_data["date"]
+#             start_date = date - timedelta(days=date.weekday())
+#             end_date = start_date + timedelta(days=6)
+#             qs = qs.filter(scheduled_date__range=(start_date, end_date))
+
+#         elif filter_type == "month":
+#             date = serializer.validated_data["date"]
+#             qs = qs.filter(
+#                 scheduled_date__year=date.year,
+#                 scheduled_date__month=date.month
+#             )
+
+#         elif filter_type == "range":
+#             qs = qs.filter(
+#                 scheduled_date__range=(
+#                     serializer.validated_data["start_date"],
+#                     serializer.validated_data["end_date"]
+#                 )
+#             )
+
+#         # -------- STATUS-BASED ORDERING (processing → completed → scheduled) --------
+#         qs = qs.order_by("scheduled_date", "scheduled_time")
+
+#         # -------- Schedule Summary (FULL DATA) --------
+#         schedule_summary = qs.aggregate(
+#             total=Count("id"),
+#             scheduled=Count("id", filter=Q(status="scheduled")),
+#             processing=Count("id", filter=Q(status="processing")),
+#             completed=Count("id", filter=Q(status="completed")),
+#         )
+
+#         # -------- Inspection Summary (FULL DATA) --------
+#         inspection_summary = qs.aggregate(
+#             total=Count("inspections", distinct=True),
+#             defected=Count("inspections", filter=Q(inspections__is_defect=True), distinct=True),
+#             non_defected=Count("inspections", filter=Q(inspections__is_defect=False), distinct=True),
+#             approved=Count("inspections", filter=Q(inspections__is_approved=True), distinct=True),
+#             human_verified=Count("inspections", filter=Q(inspections__is_human_verified=True), distinct=True),
+#             pending_verification=Count(
+#                 "inspections",
+#                 filter=Q(
+#                     inspections__is_human_verified=False,
+#                     inspections__is_approved=False
+#                 ),
+#                 distinct=True
+#             ),
+#         )
+
+#         # -------- Pagination (SAFE & DRF-MANAGED) --------
+#         page = self.paginate_queryset(qs)
+
+#         schedules_data = ScheduleSerializer(page, many=True).data
+
+#         paginator = self.paginator  # DRF paginator instance
+
+#         return Response(
+#             {
+#                 "success": True,
+#                 "message": "Robot schedule & inspection summary fetched",
+#                 "robot_id": robot_id,
+#                 "filter_type": filter_type,
+
+#                 "schedule_summary": schedule_summary,
+#                 "inspection_summary": inspection_summary,
+
+#                 "schedules": schedules_data,
+
+#                 "pagination": {
+#                     "current_page": paginator.page.number,
+#                     "total_pages": paginator.page.paginator.num_pages,
+#                     "total_records": paginator.page.paginator.count,
+#                     "page_size": paginator.page_size,
+#                     "has_next": paginator.page.has_next(),
+#                     "has_previous": paginator.page.has_previous(),
+#                 }
+#             },
+#             status=status.HTTP_200_OK
+#         )
+
+
+
+class ScheduleFilterView(GenericAPIView):
     permission_classes = [AllowAny]
+    serializer_class = ScheduleFilterSerializer
     pagination_class = EightPerPagePagination
 
     def post(self, request, robot_id):
-        serializer = ScheduleFilterSerializer(data=request.data)
+        serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         filter_type = serializer.validated_data["filter_type"]
@@ -832,7 +1180,20 @@ class ScheduleFilterView(APIView):
                 )
             )
 
-        qs = qs.order_by("scheduled_date", "scheduled_time")
+        # -------- STATUS-BASED ORDERING (processing → completed → scheduled) --------
+        qs = qs.annotate(
+            status_order=Case(
+                When(status="processing", then=Value(1)),
+                When(status="completed", then=Value(2)),
+                When(status="scheduled", then=Value(3)),
+                default=Value(4),
+                output_field=IntegerField(),
+            )
+        ).order_by(
+            "status_order",
+            "scheduled_date",
+            "scheduled_time"
+        )
 
         # -------- Schedule Summary (FULL DATA) --------
         schedule_summary = qs.aggregate(
@@ -859,9 +1220,12 @@ class ScheduleFilterView(APIView):
             ),
         )
 
-        # -------- Pagination ONLY for schedules --------
-        paginator = self.pagination_class()
-        page = paginator.paginate_queryset(qs, request)
+        # -------- Pagination (SAFE & DRF-MANAGED) --------
+        page = self.paginate_queryset(qs)
+
+        schedules_data = ScheduleSerializer(page, many=True).data
+
+        paginator = self.paginator
 
         return Response(
             {
@@ -873,10 +1237,8 @@ class ScheduleFilterView(APIView):
                 "schedule_summary": schedule_summary,
                 "inspection_summary": inspection_summary,
 
-                # 👇 paginated schedules
-                "schedules": ScheduleSerializer(page, many=True).data,
+                "schedules": schedules_data,
 
-                # 👇 pagination info (extra, no breaking change)
                 "pagination": {
                     "current_page": paginator.page.number,
                     "total_pages": paginator.page.paginator.num_pages,
@@ -889,6 +1251,9 @@ class ScheduleFilterView(APIView):
             status=status.HTTP_200_OK
         )
     
+
+
+
 
 class RobotInspectionStatsView(APIView):
     permission_classes = [IsAuthenticated]

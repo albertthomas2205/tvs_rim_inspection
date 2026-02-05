@@ -946,7 +946,7 @@ class HandPointAPI(APIView):
             calibration.save(update_fields=[active_field])
 
             event_name = f"{field}_active"
-            broadcast_to_profile(robot, profile, event_name, {"value": True,"profile_id":profile_id})
+            broadcast_to_profile(robot, event_name, {"value": True,"profile_id":profile_id})
             events.append({"event": event_name, "value": True})
 
         # -------- Check active before data update --------
