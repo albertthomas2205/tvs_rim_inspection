@@ -48,7 +48,11 @@ class Robot(models.Model):
         help_text="Local network IP of the robot"
     )
 
-
+    minimum_battery_charge = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        help_text="Minimum battery percentage required to start a schedule"
+    )
     # Lifecycle
     status = models.CharField(
         max_length=20,

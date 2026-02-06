@@ -1170,3 +1170,110 @@ class HandActionAPI(APIView):
             status=status.HTTP_200_OK
         )
     
+
+
+
+
+@api_view(["GET", "PATCH"])
+def get_or_update_min_battery(request, id):
+    # --------------------------------------------------
+    # 1. VALIDATE ROBOT
+    # --------------------------------------------------
+    try:
+        robot = Robot.objects.get(id=id, is_active=True)
+    except Robot.DoesNotExist:
+        return Response(
+            {
+                "success": False,
+                "message": "Robot not found"
+            },
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # --------------------------------------------------
+    # 2. GET MIN BATTERY
+    # --------------------------------------------------
+    if request.method == "GET":
+        return Response(
+            {
+                "success": True,
+                "data": {
+                    "robot_id": robot.id,
+                    "minimum_battery_charge": robot.minimum_battery_charge
+                }
+            },
+            status=status.HTTP_200_OK
+        )
+
+    # --------------------------------------------------
+    # 3. PATCH → UPDATE MIN BATTERY
+    # --------------------------------------------------
+    min_battery = request.data.get("minimum_battery_charge")
+
+    if min_battery is None:
+        return Response(
+            {
+                "success": False,
+                "message": "minimum_battery_charge is required"
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        min_battery = int(min_battery)
+    except ValueError:
+        return Response(
+            {
+                "success": False,
+                "message": "minimum_battery_charge must be an integer"
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    if min_battery < 0 or min_battery > 100:
+        return Response(
+            {
+                "success": False,
+                "message": "minimum_battery_charge must be between 0 and 100"
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # --------------------------------------------------
+    # 4. SAVE VALUE
+    # --------------------------------------------------
+    robot.minimum_battery_charge = min_battery
+    robot.save(update_fields=["minimum_battery_charge"])
+
+    # --------------------------------------------------
+    # 5. BROADCAST TO WEBSOCKET
+    # --------------------------------------------------
+    channel_layer = get_channel_layer()
+    group_name = f"robot_message_{robot.robo_id}"
+
+    async_to_sync(channel_layer.group_send)(
+        group_name,
+        {
+            "type": "robot_message",
+            "event": "min_battery_updated",
+            "data": {
+                "robot_id": robot.id,
+                "minimum_battery_charge": min_battery
+            }
+        }
+    )
+
+    # --------------------------------------------------
+    # 6. RESPONSE
+    # --------------------------------------------------
+    return Response(
+        {
+            "success": True,
+            "message": "Minimum battery charge updated successfully",
+            "data": {
+                "robot_id": robot.id,
+                "minimum_battery_charge": robot.minimum_battery_charge
+            }
+        },
+        status=status.HTTP_200_OK
+    )

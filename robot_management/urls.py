@@ -108,4 +108,10 @@ urlpatterns = [
         name="calibration-hand-action"
     ),
 
+    path(
+    "robots/<int:id>/get_min_battery/",
+    get_or_update_min_battery,
+    name="get_or_update_min_battery"
+),
+
 ]

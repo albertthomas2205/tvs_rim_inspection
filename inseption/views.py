@@ -78,112 +78,6 @@ class SchedulePagination(PageNumberPagination):
 )
 
 
-# @api_view(["POST"])
-# def create_schedule(request, robot_id):
-#     # ---- VALIDATE ROBOT ----
-#     try:
-#         robot = Robot.objects.get(id=robot_id, is_active=True)
-#     except Robot.DoesNotExist:
-#         return Response(
-#             {
-#                 "status": 404,
-#                 "message": "Robot not found",
-#                 "success": False,
-#             },
-#             status=status.HTTP_404_NOT_FOUND
-#         )
-
-#     location = request.data.get("location")
-#     date = request.data.get("scheduled_date")
-#     time = request.data.get("scheduled_time")
-
-#     # ---- REQUIRED FIELD VALIDATION ----
-#     missing_fields = []
-#     if not location:
-#         missing_fields.append("location")
-#     if not date:
-#         missing_fields.append("scheduled_date")
-#     if not time:
-#         missing_fields.append("scheduled_time")
-
-#     if missing_fields:
-#         return Response(
-#             {
-#                 "status": 400,
-#                 "message": f"Missing required fields: {', '.join(missing_fields)}",
-#                 "success": False,
-#             },
-#             status=status.HTTP_400_BAD_REQUEST
-#         )
-
-#     # ---- TIME PARSING ----
-#     def parse_time(t):
-#         try:
-#             return datetime.strptime(t, "%H:%M").time()
-#         except ValueError:
-#             return datetime.strptime(t, "%H:%M:%S").time()
-
-#     scheduled_time = parse_time(time)
-#     scheduled_date = datetime.strptime(date, "%Y-%m-%d").date()
-
-#     # ---- COMPUTE 3-MINUTE END TIME ----
-#     new_start_dt = datetime.combine(scheduled_date, scheduled_time)
-#     new_end_dt = new_start_dt + timedelta(minutes=3)
-#     new_end_time = new_end_dt.time()
-
-#     # ---- OVERLAP CHECK (per robot + location) ----
-#     overlapping = Schedule.objects.filter(
-#         robot=robot,
-#         location=location,
-#         scheduled_date=scheduled_date,
-#         scheduled_time__lt=new_end_time,
-#         end_time__gt=scheduled_time,
-#         is_canceled=False
-#     ).exists()
-
-#     if overlapping:
-#         return Response(
-#             {
-#                 "status": 400,
-#                 "message": "Time slot already booked for this robot and location",
-#                 "success": False
-#             },
-#             status=status.HTTP_400_BAD_REQUEST,
-#         )
-
-#     # ---- SAVE SCHEDULE ----
-#     data = request.data.copy()
-#     data["end_time"] = new_end_time
-
-#     serializer = ScheduleSerializer(data=data)
-#     serializer.is_valid(raise_exception=True)
-
-#     schedule = serializer.save(
-#         robot=robot  # 🔥 ROBOT COMES FROM URL
-#     )
-
-#     # ---- CELERY TASKS ----
-#     start_datetime = timezone.make_aware(
-#         datetime.combine(schedule.scheduled_date, schedule.scheduled_time)
-#     )
-#     end_datetime = timezone.make_aware(
-#         datetime.combine(schedule.scheduled_date, schedule.end_time)
-#     )
-
-#     set_status_processing.apply_async(args=[schedule.id], eta=start_datetime)
-#     set_status_completed.apply_async(args=[schedule.id], eta=end_datetime)
-
-#     # ---- SUCCESS RESPONSE ----
-#     return Response(
-#         {
-#             "status": 201,
-#             "message": "Schedule created successfully",
-#             "success": True,
-#             "data": serializer.data
-#         },
-#         status=status.HTTP_201_CREATED
-#     )
-
 
 
 @api_view(["POST"])
@@ -308,106 +202,14 @@ def create_schedule(request, robot_id):
     )
 
 
-# @api_view(["POST"])
-# def create_schedule_immediately(request, robot_id):
-#     # ---- VALIDATE ROBOT ----
-#     try:
-#         robot = Robot.objects.get(id=robot_id, is_active=True)
-#     except Robot.DoesNotExist:
-#         return Response(
-#             {
-#                 "status": 404,
-#                 "message": "Robot not found",
-#                 "success": False,
-#             },
-#             status=status.HTTP_404_NOT_FOUND
-#         )
-
-#     location = request.data.get("location")
-
-#     # ---- REQUIRED FIELD VALIDATION ----
-#     if not location:
-#         return Response(
-#             {
-#                 "status": 400,
-#                 "message": "Missing required field: location",
-#                 "success": False,
-#             },
-#             status=status.HTTP_400_BAD_REQUEST
-#         )
-
-#     # ---- CURRENT IST TIME ----
-#     now = timezone.localtime()
-#     rounded_now = now.replace(second=0, microsecond=0)
-
-#     scheduled_date = rounded_now.date()
-#     scheduled_time = rounded_now.time()
-
-#     # ---- END TIME = +3 minutes ----
-#     new_end_dt = rounded_now + timedelta(minutes=3)
-#     end_time = new_end_dt.replace(second=0, microsecond=0).time()
-
-#     # ---- OVERLAP CHECK (PER ROBOT) ----
-#     overlapping = Schedule.objects.filter(
-#         robot=robot,
-#         location=location,
-#         scheduled_date=scheduled_date,
-#         scheduled_time__lt=end_time,
-#         end_time__gt=scheduled_time,
-#         is_canceled=False
-#     ).exists()
-
-#     if overlapping:
-#         return Response(
-#             {
-#                 "status": 400,
-#                 "message": "A schedule already exists for this robot at this time.",
-#                 "success": False
-#             },
-#             status=status.HTTP_400_BAD_REQUEST,
-#         )
-
-#     # ---- SAVE SCHEDULE ----
-#     schedule = Schedule.objects.create(
-#         robot=robot,                 # 🔥 FROM URL
-#         location=location,
-#         scheduled_date=scheduled_date,
-#         scheduled_time=scheduled_time,
-#         end_time=end_time,
-#         status="processing"
-#     )
-
-#     # ---- CELERY TASKS ----
-#     start_datetime = rounded_now
-#     end_datetime = new_end_dt
-
-#     set_status_processing.apply_async(args=[schedule.id], eta=start_datetime)
-#     set_status_completed.apply_async(args=[schedule.id], eta=end_datetime)
-
-#     # ---- RESPONSE ----
-#     return Response(
-#         {
-#             "status": 201,
-#             "message": "Schedule created and started immediately",
-#             "success": True,
-#             "data": {
-#                 "id": schedule.id,
-#                 "robot_id": robot.id,
-#                 "location": schedule.location,
-#                 "scheduled_date": str(schedule.scheduled_date),
-#                 "scheduled_time": str(schedule.scheduled_time),
-#                 "end_time": str(schedule.end_time),
-#                 "status": schedule.status
-#             }
-#         },
-#         status=status.HTTP_201_CREATED
-#     )
-
 
 
 @api_view(["POST"])
 def create_schedule_immediately(request, robot_id):
-    # ---- VALIDATE ROBOT ----
+
+    # --------------------------------------------------
+    # 1. VALIDATE ROBOT
+    # --------------------------------------------------
     try:
         robot = Robot.objects.get(id=robot_id, is_active=True)
     except Robot.DoesNotExist:
@@ -420,10 +222,12 @@ def create_schedule_immediately(request, robot_id):
             status=status.HTTP_404_NOT_FOUND
         )
 
+    # --------------------------------------------------
+    # 2. VALIDATE REQUEST DATA
+    # --------------------------------------------------
     location = request.data.get("location")
-    end_time_input = request.data.get("end_time")   # 🔥 TAKE FROM POST
+    end_time_input = request.data.get("end_time")
 
-    # ---- REQUIRED FIELD VALIDATION ----
     if not location or not end_time_input:
         return Response(
             {
@@ -434,14 +238,16 @@ def create_schedule_immediately(request, robot_id):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # ---- CURRENT IST TIME ----
-    now = timezone.localtime()
-    rounded_now = now.replace(second=0, microsecond=0)
+    # --------------------------------------------------
+    # 3. CURRENT TIME (START TIME)
+    # --------------------------------------------------
+    now = timezone.localtime().replace(second=0, microsecond=0)
+    scheduled_date = now.date()
+    scheduled_time = now.time()
 
-    scheduled_date = rounded_now.date()
-    scheduled_time = rounded_now.time()   # 🔥 START TIME = CURRENT TIME
-
-    # ---- CONVERT END TIME ----
+    # --------------------------------------------------
+    # 4. PARSE & VALIDATE END TIME
+    # --------------------------------------------------
     try:
         end_time = datetime.strptime(end_time_input, "%H:%M").time()
     except ValueError:
@@ -454,7 +260,6 @@ def create_schedule_immediately(request, robot_id):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # ---- VALIDATE END TIME > START TIME ----
     if end_time <= scheduled_time:
         return Response(
             {
@@ -465,54 +270,80 @@ def create_schedule_immediately(request, robot_id):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # ---- OVERLAP CHECK ----
-    overlapping = Schedule.objects.filter(
+    # --------------------------------------------------
+    # 5. CHECK IF A SCHEDULE IS PROCESSING RIGHT NOW
+    # --------------------------------------------------
+    processing_now = Schedule.objects.filter(
         robot=robot,
-        location=location,
         scheduled_date=scheduled_date,
-        scheduled_time__lt=end_time,
+        scheduled_time__lte=scheduled_time,
         end_time__gt=scheduled_time,
+        status="processing",
         is_canceled=False
     ).exists()
 
-    if overlapping:
+    if processing_now:
         return Response(
             {
                 "status": 400,
-                "message": "A schedule already exists for this robot at this time.",
+                "message": "A schedule is currently processing. Immediate schedule cannot be started.",
                 "success": False
             },
-            status=status.HTTP_400_BAD_REQUEST,
+            status=status.HTTP_400_BAD_REQUEST
         )
 
-    # ---- SAVE SCHEDULE ----
+    # --------------------------------------------------
+    # 6. CANCEL FUTURE OVERLAPPING SCHEDULES
+    # --------------------------------------------------
+    future_overlaps = Schedule.objects.filter(
+        robot=robot,
+        scheduled_date=scheduled_date,
+        scheduled_time__gt=scheduled_time,
+        scheduled_time__lt=end_time,
+        is_canceled=False
+    )
+
+    future_overlaps.update(
+        status="canceled",
+        is_canceled=True
+    )
+
+    # --------------------------------------------------
+    # 7. CREATE IMMEDIATE SCHEDULE
+    # --------------------------------------------------
     schedule = Schedule.objects.create(
         robot=robot,
-        location=location,
         scheduled_date=scheduled_date,
         scheduled_time=scheduled_time,
         end_time=end_time,
-        status="processing"
+        status="processing",
     )
 
-    # ---- CELERY TASK ----
-    end_datetime = datetime.combine(scheduled_date, end_time)
-    end_datetime = timezone.make_aware(end_datetime)
+    # --------------------------------------------------
+    # 8. CELERY TASK FOR AUTO COMPLETION
+    # --------------------------------------------------
+    end_datetime = timezone.make_aware(
+        datetime.combine(scheduled_date, end_time)
+    )
 
-    set_status_completed.apply_async(args=[schedule.id], eta=end_datetime)
+    set_status_completed.apply_async(
+        args=[schedule.id],
+        eta=end_datetime
+    )
 
-    # ---- RESPONSE ----
+    # --------------------------------------------------
+    # 9. RESPONSE
+    # --------------------------------------------------
     return Response(
         {
             "status": 201,
-            "message": "Schedule created and started immediately",
+            "message": "Immediate schedule created successfully. Future schedules overridden.",
             "success": True,
             "data": {
-                "id": schedule.id,
+                "schedule_id": schedule.id,
                 "robot_id": robot.id,
                 "location": schedule.location,
-                "scheduled_date": str(schedule.scheduled_date),
-                "scheduled_time": str(schedule.scheduled_time),
+                "start_time": str(schedule.scheduled_time),
                 "end_time": str(schedule.end_time),
                 "status": schedule.status
             }
