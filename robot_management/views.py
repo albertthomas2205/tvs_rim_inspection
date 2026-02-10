@@ -151,13 +151,51 @@ class RobotViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK
         )
     
-    def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+    # def perform_create(self, serializer):
+    #     serializer.save(created_by=self.request.user)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        self.perform_create(serializer)
+
+        # 🔁 Re-fetch with annotations
+        robot = self.get_queryset().get(id=serializer.instance.id)
+
+        response_serializer = self.get_serializer(robot)
+
+        return Response(
+            {
+                "success": True,
+                "message": "Robot created successfully",
+                "data": response_serializer.data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
 
     def perform_update(self, serializer):
         serializer.save(updated_by=self.request.user)
 
     # Deactivate (DELETE)
+    # def destroy(self, request, *args, **kwargs):
+    #     if not request.user.is_superuser:
+    #         return Response(
+    #             {"success": False, "message": "Permission denied"},
+    #             status=status.HTTP_403_FORBIDDEN
+    #         )
+
+    #     robot = self.get_object()
+    #     robot.is_active = False
+    #     robot.save(update_fields=["is_active"])
+
+    #     return Response(
+    #         {"success": True, "message": "Robot deactivated"},
+    #         status=status.HTTP_200_OK
+    #     )
+    
+
     def destroy(self, request, *args, **kwargs):
         if not request.user.is_superuser:
             return Response(
@@ -166,14 +204,21 @@ class RobotViewSet(viewsets.ModelViewSet):
             )
 
         robot = self.get_object()
-        robot.is_active = False
-        robot.save(update_fields=["is_active"])
+        force = request.query_params.get("force") == "true"
+
+        if force:
+            robot.delete()
+            message = "Robot permanently deleted"
+        else:
+            robot.is_active = False
+            robot.save(update_fields=["is_active"])
+            message = "Robot deactivated"
 
         return Response(
-            {"success": True, "message": "Robot deactivated"},
+            {"success": True, "message": message},
             status=status.HTTP_200_OK
         )
-    
+
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance)

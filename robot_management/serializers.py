@@ -8,6 +8,8 @@ class AssignedUserSerializer(serializers.ModelSerializer):
         model = User
         fields = ["id", "username", "email"]
 
+
+
 class RobotSerializer(serializers.ModelSerializer):
     schedule_summary = serializers.SerializerMethodField()
     inspection_summary = serializers.SerializerMethodField()
@@ -38,6 +40,7 @@ class RobotSerializer(serializers.ModelSerializer):
             "updated_at",
             "created_by",
             "updated_by",
+            "minimum_battery_charge",
             "assigned_users"
         ]
 
@@ -71,6 +74,9 @@ class RobotSerializer(serializers.ModelSerializer):
         ).distinct()
 
         return AssignedUserSerializer(users, many=True).data
+    
+
+    
 
 class RobotMapSerializer(serializers.ModelSerializer):
     uploaded_by = serializers.ReadOnlyField(source="uploaded_by.username")

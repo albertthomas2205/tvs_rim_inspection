@@ -10,6 +10,8 @@ urlpatterns = [
     path("robots/<int:robot_id>/schedules/", views.list_schedules_by_robot,name="list-schedules" ),
     path("robots/<int:robot_id>/schedule/create/", views.create_schedule,name="create-schedule" ),
     path("robots/<int:robot_id>/schedule/create-immediately/",views.create_schedule_immediately,name="create-schedule-immediately"),
+    path("robots/<int:robot_id>/schedule/<int:schedule_id>/", views.create_or_update_schedule),
+    path("robots/<int:robot_id>/schedule/<int:schedule_id>/cancel/",views.cancel_schedule),
     path("schedule/create/", views.create_schedule),
     path("schedule/create-immediately/", views.create_schedule_immediately),
     path("schedule/delete/<int:schedule_id>/", views.delete_schedule),
@@ -22,11 +24,7 @@ urlpatterns = [
     path('speak/stop/', views.StopSpeakView.as_view(), name='stop-speak'),
     path("speak/status/", views.SpeakStatusView.as_view()),
     path("emergency-stop/", views.EmergencyStopAPIView.as_view()),
-    path(
-        "robots/<int:robot_id>/inspection-stats/",
-        views.RobotInspectionStatsView.as_view(),
-        name="robot-inspection-stats"
-    ),
+    path("robots/<int:robot_id>/inspection-stats/",views.RobotInspectionStatsView.as_view(),name="robot-inspection-stats"),
     path("rim-types/", views.rim_type_list_create, name="rim-type-list-create"),
     path("rim-types/<int:rim_type_id>/", views.rim_type_detail, name="rim-type-detail"),
 ]

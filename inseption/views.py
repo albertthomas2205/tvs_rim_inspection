@@ -31,6 +31,8 @@ from django.shortcuts import get_object_or_404
 from rest_framework.generics import RetrieveAPIView
 from rest_framework.pagination import PageNumberPagination
 from robot_management.models import Robot
+from datetime import datetime, time, date as date_type
+
 
 from .models import RimType
 from .serializers import RimTypeSerializer
@@ -200,6 +202,261 @@ def create_schedule(request, robot_id):
         },
         status=status.HTTP_201_CREATED
     )
+
+
+
+
+@api_view(["POST", "PATCH"])
+def create_or_update_schedule(request, robot_id, schedule_id=None):
+    # --------------------------------------------------
+    # 1. VALIDATE ROBOT
+    # --------------------------------------------------
+    try:
+        robot = Robot.objects.get(id=robot_id, is_active=True)
+    except Robot.DoesNotExist:
+        return Response(
+            {"status": 404, "message": "Robot not found", "success": False},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # --------------------------------------------------
+    # 2. VALIDATE SCHEDULE (PATCH ONLY)
+    # --------------------------------------------------
+    schedule = None
+    if request.method == "PATCH":
+        try:
+            schedule = Schedule.objects.get(
+                id=schedule_id,
+                robot=robot,
+                is_canceled=False
+            )
+        except Schedule.DoesNotExist:
+            return Response(
+                {
+                    "status": 404,
+                    "message": "Schedule not found or already canceled",
+                    "success": False
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+    # --------------------------------------------------
+    # 3. READ INPUTS (PATCH SAFE)
+    # --------------------------------------------------
+    location = request.data.get(
+        "location",
+        getattr(schedule, "location", None)
+    )
+
+    scheduled_date_raw = request.data.get(
+        "scheduled_date",
+        getattr(schedule, "scheduled_date", None)
+    )
+
+    start_time_raw = request.data.get(
+        "scheduled_time",
+        getattr(schedule, "scheduled_time", None)
+    )
+
+    end_time_raw = request.data.get(
+        "end_time",
+        getattr(schedule, "end_time", None)
+    )
+
+    # --------------------------------------------------
+    # 4. REQUIRED FIELD VALIDATION
+    # --------------------------------------------------
+    missing_fields = []
+    for field, value in {
+        "location": location,
+        "scheduled_date": scheduled_date_raw,
+        "scheduled_time": start_time_raw,
+        "end_time": end_time_raw,
+    }.items():
+        if not value:
+            missing_fields.append(field)
+
+    if missing_fields:
+        return Response(
+            {
+                "status": 400,
+                "message": f"Missing required fields: {', '.join(missing_fields)}",
+                "success": False,
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # --------------------------------------------------
+    # 5. PARSE DATE & TIME (POST + PATCH SAFE)
+    # --------------------------------------------------
+    def parse_time(value):
+        if isinstance(value, time):
+            return value
+        try:
+            return datetime.strptime(value, "%H:%M").time()
+        except ValueError:
+            return datetime.strptime(value, "%H:%M:%S").time()
+
+    try:
+        scheduled_time = parse_time(start_time_raw)
+        end_time = parse_time(end_time_raw)
+
+        if isinstance(scheduled_date_raw, date_type):
+            scheduled_date = scheduled_date_raw
+        else:
+            scheduled_date = datetime.strptime(
+                scheduled_date_raw, "%Y-%m-%d"
+            ).date()
+
+    except ValueError:
+        return Response(
+            {
+                "status": 400,
+                "message": "Invalid date or time format",
+                "success": False
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # --------------------------------------------------
+    # 6. TIME LOGIC VALIDATION
+    # --------------------------------------------------
+    if end_time <= scheduled_time:
+        return Response(
+            {
+                "status": 400,
+                "message": "end_time must be greater than scheduled_time",
+                "success": False
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # --------------------------------------------------
+    # 7. OVERLAP CHECK
+    # --------------------------------------------------
+    overlap_qs = Schedule.objects.filter(
+        robot=robot,
+        scheduled_date=scheduled_date,
+        scheduled_time__lt=end_time,
+        end_time__gt=scheduled_time,
+        is_canceled=False
+    )
+
+    if schedule:
+        overlap_qs = overlap_qs.exclude(id=schedule.id)
+
+    if overlap_qs.exists():
+        return Response(
+            {
+                "status": 400,
+                "message": "Time slot already booked for this robot",
+                "success": False
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # --------------------------------------------------
+    # 8. SAVE SCHEDULE
+    # --------------------------------------------------
+    serializer = ScheduleSerializer(
+        instance=schedule,
+        data={
+            "location": location,
+            "scheduled_date": scheduled_date,
+            "scheduled_time": scheduled_time,
+            "end_time": end_time,
+        },
+        partial=True if request.method == "PATCH" else False
+    )
+    serializer.is_valid(raise_exception=True)
+    schedule = serializer.save(robot=robot)
+
+    # --------------------------------------------------
+    # 9. CELERY TASKS (ETA BASED)
+    # --------------------------------------------------
+    start_dt = timezone.make_aware(
+        datetime.combine(schedule.scheduled_date, schedule.scheduled_time)
+    )
+    end_dt = timezone.make_aware(
+        datetime.combine(schedule.scheduled_date, schedule.end_time)
+    )
+
+    set_status_processing.apply_async(
+        args=[schedule.id],
+        eta=start_dt
+    )
+    set_status_completed.apply_async(
+        args=[schedule.id],
+        eta=end_dt
+    )
+
+    # --------------------------------------------------
+    # 10. RESPONSE
+    # --------------------------------------------------
+    return Response(
+        {
+            "status": 200 if request.method == "PATCH" else 201,
+            "message": (
+                "Schedule updated successfully"
+                if request.method == "PATCH"
+                else "Schedule created successfully"
+            ),
+            "success": True,
+            "data": serializer.data
+        },
+        status=status.HTTP_200_OK
+        if request.method == "PATCH"
+        else status.HTTP_201_CREATED
+    )
+
+
+@api_view(["PATCH"])
+def cancel_schedule(request, robot_id, schedule_id):
+    # ---- VALIDATE ROBOT ----
+    try:
+        robot = Robot.objects.get(id=robot_id, is_active=True)
+    except Robot.DoesNotExist:
+        return Response(
+            {"status": 404, "message": "Robot not found", "success": False},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # ---- VALIDATE SCHEDULE ----
+    try:
+        schedule = Schedule.objects.get(
+            id=schedule_id,
+            robot=robot,
+            is_canceled=False
+        )
+    except Schedule.DoesNotExist:
+        return Response(
+            {
+                "status": 404,
+                "message": "Schedule not found or already canceled",
+                "success": False,
+            },
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # ---- SOFT CANCEL ----
+    schedule.is_canceled = True
+    schedule.canceled_at = timezone.now()
+    schedule.save(update_fields=["is_canceled", "canceled_at"])
+
+    # ---- OPTIONAL: UPDATE STATUS ----
+    if hasattr(schedule, "status"):
+        schedule.status = "canceled"
+        schedule.save(update_fields=["status"])
+
+    return Response(
+        {
+            "status": 200,
+            "message": "Schedule canceled successfully",
+            "success": True,
+        },
+        status=status.HTTP_200_OK
+    )
+
 
 
 
@@ -1190,3 +1447,5 @@ def rim_type_detail(request, rim_type_id):
             "success": True,
             "message": "Rim type deactivated successfully"
         }, status=status.HTTP_200_OK)
+    
+    
