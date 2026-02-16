@@ -440,8 +440,7 @@ def cancel_schedule(request, robot_id, schedule_id):
 
     # ---- SOFT CANCEL ----
     schedule.is_canceled = True
-    schedule.canceled_at = timezone.now()
-    schedule.save(update_fields=["is_canceled", "canceled_at"])
+    schedule.save(update_fields=["is_canceled"])
 
     # ---- OPTIONAL: UPDATE STATUS ----
     if hasattr(schedule, "status"):
@@ -1272,8 +1271,8 @@ class ScheduleFilterView(GenericAPIView):
         qs = qs.annotate(
             status_order=Case(
                 When(status="processing", then=Value(1)),
-                When(status="completed", then=Value(2)),
-                When(status="scheduled", then=Value(3)),
+                When(status="scheduled", then=Value(2)),
+                When(status="completed", then=Value(3)),
                 default=Value(4),
                 output_field=IntegerField(),
             )
@@ -1286,8 +1285,8 @@ class ScheduleFilterView(GenericAPIView):
         # -------- Schedule Summary (FULL DATA) --------
         schedule_summary = qs.aggregate(
             total=Count("id"),
-            scheduled=Count("id", filter=Q(status="scheduled")),
             processing=Count("id", filter=Q(status="processing")),
+            scheduled=Count("id", filter=Q(status="scheduled")),    
             completed=Count("id", filter=Q(status="completed")),
         )
 
@@ -1370,14 +1369,55 @@ class RobotInspectionStatsView(APIView):
         })
     
 
+
+class RimTypePagination(PageNumberPagination):
+    page_size = 8 # number of rim types per page
+    page_size_query_param = "page_size"  # allow frontend to override ?page_size=
+    max_page_size = 50
+
 # ---------------- LIST & CREATE ----------------
+# @api_view(["GET", "POST"])
+# @permission_classes([IsAuthenticated, IsAdminUser])
+# def rim_type_list_create(request):
+#     if request.method == "GET":
+#         rim_types = RimType.objects.all().order_by("-created_at")
+#         serializer = RimTypeSerializer(rim_types, many=True)
+#         return Response({
+#             "success": True,
+#             "message": "Rim types retrieved successfully",
+#             "data": serializer.data
+#         })
+
+#     if request.method == "POST":
+#         serializer = RimTypeSerializer(data=request.data)
+#         if serializer.is_valid():
+#             serializer.save()
+#             return Response({
+#                 "success": True,
+#                 "message": "Rim type created successfully",
+#                 "data": serializer.data
+#             }, status=status.HTTP_201_CREATED)
+
+#         return Response({
+#             "success": False,
+#             "errors": serializer.errors
+#         }, status=status.HTTP_400_BAD_REQUEST)
+
+
+
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated, IsAdminUser])
 def rim_type_list_create(request):
     if request.method == "GET":
         rim_types = RimType.objects.all().order_by("-created_at")
-        serializer = RimTypeSerializer(rim_types, many=True)
-        return Response({
+
+        # ---------------- PAGINATION ----------------
+        paginator = RimTypePagination()
+        page = paginator.paginate_queryset(rim_types, request)
+        serializer = RimTypeSerializer(page, many=True)
+
+        # return paginated response
+        return paginator.get_paginated_response({
             "success": True,
             "message": "Rim types retrieved successfully",
             "data": serializer.data
@@ -1447,5 +1487,4 @@ def rim_type_detail(request, rim_type_id):
             "success": True,
             "message": "Rim type deactivated successfully"
         }, status=status.HTTP_200_OK)
-    
     

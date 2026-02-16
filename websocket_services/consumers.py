@@ -141,11 +141,8 @@ class RobotMessageConsumer(AsyncWebsocketConsumer):
     def get_robot(self, robo_id):
         from robot_management.models import Robot
         return Robot.objects.filter(
-            robo_id=robo_id,
-            is_active=True
+            robo_id=robo_id
         ).first()
-
-
 
 
 
