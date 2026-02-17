@@ -113,5 +113,10 @@ urlpatterns = [
     get_or_update_min_battery,
     name="get_or_update_min_battery"
 ),
+path(
+    "robots/<int:robot_id>/autonomous_status/",
+    RobotAutonomousStatusAPIView.as_view(),
+    name="robot-autonomous-status"
+),
 
 ]

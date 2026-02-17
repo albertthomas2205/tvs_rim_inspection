@@ -128,7 +128,7 @@ class RobotNavigationUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = RobotNavigation
-        fields = ["navigation_mode", "navigation_style"]
+        fields = ["navigation_mode", "navigation_style","autonomous_ready"]
 
     def validate(self, attrs):
         mode = attrs.get(

@@ -207,6 +207,7 @@ class RobotNavigation(models.Model):
         ('autonomous', 'Autonomous'),
         ('stationary', 'Stationary'),
     ]
+    autonomous_ready = models.BooleanField(default=False)
 
     NAVIGATION_STYLE_CHOICES = [
         ('free', 'Free'),

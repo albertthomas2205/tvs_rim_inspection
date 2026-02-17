@@ -1322,3 +1322,66 @@ def get_or_update_min_battery(request, id):
         },
         status=status.HTTP_200_OK
     )
+
+
+
+class RobotAutonomousStatusAPIView(APIView):
+    """
+    PATCH API to update 'autonomous_ready' field and broadcast event to robot profile.
+    """
+
+    def patch(self, request, robot_id):
+        navigation = get_object_or_404(RobotNavigation, robot_id=robot_id)
+        robot = navigation.robot  # get the related robot
+
+        autonomous_ready = request.data.get("autonomous_ready")
+
+        if autonomous_ready is None:
+            return Response(
+                {"error": "autonomous_ready field is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Convert string "true"/"false" from frontend to boolean
+        if isinstance(autonomous_ready, str):
+            autonomous_ready = autonomous_ready.lower() == "true"
+
+        if not isinstance(autonomous_ready, bool):
+            return Response(
+                {"error": "autonomous_ready must be a boolean"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Update the field
+        navigation.autonomous_ready = autonomous_ready
+        navigation.save(update_fields=["autonomous_ready"])
+
+        # 🔥 Broadcast event to robot profile
+        # Update the database
+        navigation.autonomous_ready = autonomous_ready
+        navigation.save(update_fields=["autonomous_ready"])
+
+
+          # 🔥 Broadcast to robot-specific group
+        channel_layer = get_channel_layer()
+        group_name = f"robot_message_{robot.robo_id}"  # dynamic group name
+        async_to_sync(channel_layer.group_send)(
+            group_name,
+            {
+                "type": "robot_message",   # must match consumer method
+                "event": "autonomous_ready",
+                "data": {
+                    "status": autonomous_ready,
+                    "mode_active": autonomous_ready
+                }
+            }
+        )
+
+    
+        return Response(
+            {
+                "message": "Autonomous ready status updated successfully",
+                "autonomous_ready": navigation.autonomous_ready
+            },
+            status=status.HTTP_200_OK
+        )
