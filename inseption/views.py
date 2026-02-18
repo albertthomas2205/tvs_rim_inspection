@@ -1225,6 +1225,123 @@ class EightPerPagePagination(PageNumberPagination):
 
 
 
+# class ScheduleFilterView(GenericAPIView):
+#     permission_classes = [AllowAny]
+#     serializer_class = ScheduleFilterSerializer
+#     pagination_class = EightPerPagePagination
+
+#     def post(self, request, robot_id):
+#         serializer = self.get_serializer(data=request.data)
+#         serializer.is_valid(raise_exception=True)
+
+#         filter_type = serializer.validated_data["filter_type"]
+
+#         qs = Schedule.objects.filter(
+#             robot_id=robot_id,
+#             is_canceled=False
+#         )
+
+#         # -------- Date filters --------
+#         if filter_type == "day":
+#             date = serializer.validated_data["date"]
+#             qs = qs.filter(scheduled_date=date)
+
+#         elif filter_type == "week":
+#             date = serializer.validated_data["date"]
+#             start_date = date - timedelta(days=date.weekday())
+#             end_date = start_date + timedelta(days=6)
+#             qs = qs.filter(scheduled_date__range=(start_date, end_date))
+
+#         elif filter_type == "month":
+#             date = serializer.validated_data["date"]
+#             qs = qs.filter(
+#                 scheduled_date__year=date.year,
+#                 scheduled_date__month=date.month
+#             )
+
+#         elif filter_type == "range":
+#             qs = qs.filter(
+#                 scheduled_date__range=(
+#                     serializer.validated_data["start_date"],
+#                     serializer.validated_data["end_date"]
+#                 )
+#             )
+
+#         # -------- STATUS-BASED ORDERING (processing → completed → scheduled) --------
+#         qs = qs.annotate(
+#             status_order=Case(
+#                 When(status="processing", then=Value(1)),
+#                 When(status="scheduled", then=Value(2)),
+#                 When(status="completed", then=Value(3)),
+#                 default=Value(4),
+#                 output_field=IntegerField(),
+#             )
+#         ).order_by(
+#             "status_order",
+#             "scheduled_date",
+#             "scheduled_time"
+#         )
+
+#         # -------- Schedule Summary (FULL DATA) --------
+#         schedule_summary = qs.aggregate(
+#             total=Count("id"),
+#             processing=Count("id", filter=Q(status="processing")),
+#             scheduled=Count("id", filter=Q(status="scheduled")),    
+#             completed=Count("id", filter=Q(status="completed")),
+#         )
+
+#         # -------- Inspection Summary (FULL DATA) --------
+#         inspection_summary = qs.aggregate(
+#             total=Count("inspections", distinct=True),
+#             defected=Count("inspections", filter=Q(inspections__is_defect=True), distinct=True),
+#             non_defected=Count("inspections", filter=Q(inspections__is_defect=False), distinct=True),
+#             approved=Count("inspections", filter=Q(inspections__is_approved=True), distinct=True),
+#             human_verified=Count("inspections", filter=Q(inspections__is_human_verified=True), distinct=True),
+#             pending_verification=Count(
+#                 "inspections",
+#                 filter=Q(
+#                     inspections__is_human_verified=False,
+#                     inspections__is_approved=False
+#                 ),
+#                 distinct=True
+#             ),
+#         )
+
+#         # -------- Pagination (SAFE & DRF-MANAGED) --------
+#         page = self.paginate_queryset(qs)
+
+#         schedules_data = ScheduleSerializer(page, many=True).data
+
+#         paginator = self.paginator
+
+#         return Response(
+#             {
+#                 "success": True,
+#                 "message": "Robot schedule & inspection summary fetched",
+#                 "robot_id": robot_id,
+#                 "filter_type": filter_type,
+
+#                 "schedule_summary": schedule_summary,
+#                 "inspection_summary": inspection_summary,
+
+#                 "schedules": schedules_data,
+
+#                 "pagination": {
+#                     "current_page": paginator.page.number,
+#                     "total_pages": paginator.page.paginator.num_pages,
+#                     "total_records": paginator.page.paginator.count,
+#                     "page_size": paginator.page_size,
+#                     "has_next": paginator.page.has_next(),
+#                     "has_previous": paginator.page.has_previous(),
+#                 }
+#             },
+#             status=status.HTTP_200_OK
+#         )
+    
+
+
+
+
 class ScheduleFilterView(GenericAPIView):
     permission_classes = [AllowAny]
     serializer_class = ScheduleFilterSerializer
@@ -1236,38 +1353,42 @@ class ScheduleFilterView(GenericAPIView):
 
         filter_type = serializer.validated_data["filter_type"]
 
+        # ---------------- BASE QUERYSET ----------------
         qs = Schedule.objects.filter(
             robot_id=robot_id,
             is_canceled=False
         )
 
-        # -------- Date filters --------
+        # ---------------- DATE FILTERS ----------------
         if filter_type == "day":
-            date = serializer.validated_data["date"]
+            date = serializer.validated_data.get("date")
             qs = qs.filter(scheduled_date=date)
 
         elif filter_type == "week":
-            date = serializer.validated_data["date"]
+            date = serializer.validated_data.get("date")
             start_date = date - timedelta(days=date.weekday())
             end_date = start_date + timedelta(days=6)
             qs = qs.filter(scheduled_date__range=(start_date, end_date))
 
         elif filter_type == "month":
-            date = serializer.validated_data["date"]
+            date = serializer.validated_data.get("date")
             qs = qs.filter(
                 scheduled_date__year=date.year,
                 scheduled_date__month=date.month
             )
 
         elif filter_type == "range":
-            qs = qs.filter(
-                scheduled_date__range=(
-                    serializer.validated_data["start_date"],
-                    serializer.validated_data["end_date"]
-                )
-            )
+            start_date = serializer.validated_data.get("start_date")
+            end_date = serializer.validated_data.get("end_date")
+            qs = qs.filter(scheduled_date__range=(start_date, end_date))
 
-        # -------- STATUS-BASED ORDERING (processing → completed → scheduled) --------
+        # ---------------- STATUS FILTER (VERY IMPORTANT POSITION) ----------------
+        status_list = serializer.validated_data.get("status")
+
+        if status_list:
+            qs = qs.filter(status__in=status_list)
+
+        # ---------------- STATUS ORDERING ----------------
         qs = qs.annotate(
             status_order=Case(
                 When(status="processing", then=Value(1)),
@@ -1282,21 +1403,37 @@ class ScheduleFilterView(GenericAPIView):
             "scheduled_time"
         )
 
-        # -------- Schedule Summary (FULL DATA) --------
+        # ---------------- SCHEDULE SUMMARY (AFTER ALL FILTERS) ----------------
         schedule_summary = qs.aggregate(
             total=Count("id"),
             processing=Count("id", filter=Q(status="processing")),
-            scheduled=Count("id", filter=Q(status="scheduled")),    
+            scheduled=Count("id", filter=Q(status="scheduled")),
             completed=Count("id", filter=Q(status="completed")),
         )
 
-        # -------- Inspection Summary (FULL DATA) --------
+        # ---------------- INSPECTION SUMMARY (AFTER ALL FILTERS) ----------------
         inspection_summary = qs.aggregate(
             total=Count("inspections", distinct=True),
-            defected=Count("inspections", filter=Q(inspections__is_defect=True), distinct=True),
-            non_defected=Count("inspections", filter=Q(inspections__is_defect=False), distinct=True),
-            approved=Count("inspections", filter=Q(inspections__is_approved=True), distinct=True),
-            human_verified=Count("inspections", filter=Q(inspections__is_human_verified=True), distinct=True),
+            defected=Count(
+                "inspections",
+                filter=Q(inspections__is_defect=True),
+                distinct=True
+            ),
+            non_defected=Count(
+                "inspections",
+                filter=Q(inspections__is_defect=False),
+                distinct=True
+            ),
+            approved=Count(
+                "inspections",
+                filter=Q(inspections__is_approved=True),
+                distinct=True
+            ),
+            human_verified=Count(
+                "inspections",
+                filter=Q(inspections__is_human_verified=True),
+                distinct=True
+            ),
             pending_verification=Count(
                 "inspections",
                 filter=Q(
@@ -1307,10 +1444,13 @@ class ScheduleFilterView(GenericAPIView):
             ),
         )
 
-        # -------- Pagination (SAFE & DRF-MANAGED) --------
+        # ---------------- PAGINATION (AFTER FILTERS) ----------------
         page = self.paginate_queryset(qs)
 
-        schedules_data = ScheduleSerializer(page, many=True).data
+        if page is not None:
+            schedules_data = ScheduleSerializer(page, many=True).data
+        else:
+            schedules_data = ScheduleSerializer(qs, many=True).data
 
         paginator = self.paginator
 
@@ -1327,19 +1467,16 @@ class ScheduleFilterView(GenericAPIView):
                 "schedules": schedules_data,
 
                 "pagination": {
-                    "current_page": paginator.page.number,
-                    "total_pages": paginator.page.paginator.num_pages,
-                    "total_records": paginator.page.paginator.count,
+                    "current_page": paginator.page.number if page else 1,
+                    "total_pages": paginator.page.paginator.num_pages if page else 1,
+                    "total_records": paginator.page.paginator.count if page else schedule_summary["total"],
                     "page_size": paginator.page_size,
-                    "has_next": paginator.page.has_next(),
-                    "has_previous": paginator.page.has_previous(),
+                    "has_next": paginator.page.has_next() if page else False,
+                    "has_previous": paginator.page.has_previous() if page else False,
                 }
             },
             status=status.HTTP_200_OK
         )
-    
-
-
 
 
 class RobotInspectionStatsView(APIView):

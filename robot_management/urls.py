@@ -119,4 +119,10 @@ path(
     name="robot-autonomous-status"
 ),
 
+ path(
+        "robot/<int:robot_id>/mode-active/",
+        RobotModeActiveAPIView.as_view(),
+        name="robot-mode-active"
+    ),
+
 ]

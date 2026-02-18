@@ -1372,7 +1372,6 @@ class RobotAutonomousStatusAPIView(APIView):
                 "event": "autonomous_ready",
                 "data": {
                     "status": autonomous_ready,
-                    "mode_active": autonomous_ready
                 }
             }
         )
@@ -1382,6 +1381,63 @@ class RobotAutonomousStatusAPIView(APIView):
             {
                 "message": "Autonomous ready status updated successfully",
                 "autonomous_ready": navigation.autonomous_ready
+            },
+            status=status.HTTP_200_OK
+        )
+    
+
+
+class RobotModeActiveAPIView(APIView):
+    """
+    PATCH API to update 'mode_active' field and broadcast event to robot profile.
+    """
+
+    def patch(self, request, robot_id):
+        navigation = get_object_or_404(RobotNavigation, robot_id=robot_id)
+        robot = navigation.robot
+
+        mode_active = request.data.get("mode_active")
+
+        # -------- Validation --------
+        if mode_active is None:
+            return Response(
+                {"error": "mode_active field is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Convert string "true"/"false" to boolean
+        if isinstance(mode_active, str):
+            mode_active = mode_active.lower() == "true"
+
+        if not isinstance(mode_active, bool):
+            return Response(
+                {"error": "mode_active must be a boolean"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # -------- Update Database --------
+        navigation.mode_active = mode_active
+        navigation.save(update_fields=["mode_active"])
+
+        # -------- Broadcast Event --------
+        channel_layer = get_channel_layer()
+        group_name = f"robot_message_{robot.robo_id}"
+
+        async_to_sync(channel_layer.group_send)(
+            group_name,
+            {
+                "type": "robot_message",   # Must match consumer method
+                "event": "mode_active",    # 🔥 New event name
+                "data": {
+                    "status": mode_active,
+                }
+            }
+        )
+
+        return Response(
+            {
+                "message": "Mode active status updated successfully",
+                "mode_active": navigation.mode_active
             },
             status=status.HTTP_200_OK
         )
