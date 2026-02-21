@@ -14,6 +14,7 @@ from .serializers import UserListSerializer,RobotUserAssignSerializer
 from robot_management.models import Robot
 from .serializers import *
 from rest_framework.pagination import PageNumberPagination
+from rest_framework_simplejwt.views import TokenVerifyView
 # ------------------- Registration -------------------
 class RegisterAPIView(APIView):
     permission_classes = [AllowAny]
@@ -353,6 +354,21 @@ class RemoveRobotsFromUserView(APIView):
                 "success": True,
                 "message": "Robots removed from user",
                 "removed_count": deleted
+            },
+            status=status.HTTP_200_OK
+        )
+
+
+class CustomTokenVerifyView(TokenVerifyView):
+
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+
+        # If token is valid, super() returns 200
+        return Response(
+            {
+                "status": True,
+                "message": "Token is valid",
             },
             status=status.HTTP_200_OK
         )

@@ -1,6 +1,7 @@
 from django.urls import path
 from .views import RegisterAPIView, LoginAPIView, MeAPIView,ForgotPasswordAPIView,ResetPasswordAPIView,list_users,update_user,AssignUsersToRobotView
 from rest_framework_simplejwt.views import TokenRefreshView
+from rest_framework_simplejwt.views import TokenVerifyView
 from .views import *
 
 
@@ -11,6 +12,7 @@ urlpatterns = [
 
     # JWT refresh
     path("token/refresh/", TokenRefreshView.as_view()),
+    path("token/verify/", CustomTokenVerifyView.as_view(), name="token_verify"),
 
     path("forgot-password/", ForgotPasswordAPIView.as_view()),
     path("reset-password/", ResetPasswordAPIView.as_view()),

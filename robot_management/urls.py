@@ -120,7 +120,7 @@ path(
 ),
 
  path(
-        "robot/<int:robot_id>/mode-active/",
+        "robots/<int:robot_id>/mode-active/",
         RobotModeActiveAPIView.as_view(),
         name="robot-mode-active"
     ),

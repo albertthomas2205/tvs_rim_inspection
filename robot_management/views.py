@@ -523,7 +523,8 @@ def robot_location(request, robot_id):
             "data": serializer.data
         })
 
-    # -------- CREATE / UPDATE LOCATION --------
+  
+
     if request.method == "POST":
         location_obj, created = RobotLocation.objects.get_or_create(
             robot=robot,
@@ -535,6 +536,20 @@ def robot_location(request, robot_id):
             location_obj.save()
 
         serializer = RobotLocationSerializer(location_obj)
+
+        # 🔥 WebSocket Trigger Start
+        channel_layer = get_channel_layer()
+
+        async_to_sync(channel_layer.group_send)(
+            f"robot_message_{robot.robo_id}",   # MUST match consumer group name
+            {
+                "type": "robot_message",        # MUST match consumer method
+                "event": "location_updated",    # Your custom event name
+                "data": serializer.data         # Send updated location
+            }
+        )
+        # 🔥 WebSocket Trigger End
+
         return Response({
             "success": True,
             "message": "Robot location saved successfully",
