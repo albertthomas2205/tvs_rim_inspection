@@ -55,7 +55,6 @@ class Inspection(models.Model):
     schedule = models.ForeignKey(Schedule, on_delete=models.CASCADE, related_name="inspections")
 
 
-
     rim_type = models.ForeignKey(
         RimType,
         on_delete=models.SET_NULL,

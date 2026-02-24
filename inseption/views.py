@@ -43,7 +43,7 @@ from .serializers import RimTypeSerializer
 class InspectionPagination(PageNumberPagination):
     page_size = 5
     page_size_query_param = 'page_size'
-    max_page_size = 50
+    max_page_size = 1000
 
     def get_paginated_response(self, data, *, total_defected=0, total_non_defected=0):
         return Response({
@@ -870,22 +870,103 @@ def list_schedules_by_robot(request, robot_id=None):
 
 
 
+# class InspectionListCreateView(ListCreateAPIView):
+#     permission_classes = [IsAuthenticated]
+#     serializer_class = InspectionSerializer
+#     parser_classes = [MultiPartParser, FormParser, JSONParser]
+#     pagination_class = InspectionPagination  # ← add pagination
+
+#     def get_queryset(self):
+#         return Inspection.objects.filter(schedule=self.kwargs["schedule_id"])
+
+#     def perform_create(self, serializer):
+#         schedule_id = self.kwargs["schedule_id"]
+#         # Save the inspection
+#         inspection = serializer.save(schedule_id=schedule_id)
+
+#         # ------------------ Broadcast full serialized data ------------------
+#         inspection_data = InspectionSerializer(inspection).data  # includes all fields
+
+#         channel_layer = get_channel_layer()
+#         group_name = f"schedule_{schedule_id}"
+
+#         async_to_sync(channel_layer.group_send)(
+#             group_name,
+#             {
+#                 "type": "inspection_created",      # this tells the consumer which method to call
+#                 "event": "inspection_created",    # optional extra info
+#                 "data": inspection_data           # your full inspection data
+#             }
+#         )
+
+#         return inspection
+
+
+#     # ✅ Custom success response
+#     def create(self, request, *args, **kwargs):
+#         response = super().create(request, *args, **kwargs)
+#         return Response({
+#             "success": True,
+#             "message": "Inspection created successfully",
+#             "inspection": response.data
+#         }, status=status.HTTP_201_CREATED)
+
+#     # ---------- GET CUSTOM RESPONSE with pagination ----------
+
+#     def list(self, request, *args, **kwargs):
+#         queryset = self.get_queryset()
+
+#         totals = queryset.aggregate(
+#             total_defected=Count("id", filter=Q(is_defect=True)),
+#             total_non_defected=Count("id", filter=Q(is_defect=False)),
+#         )
+
+#         page = self.paginate_queryset(queryset)
+#         if page is not None:
+#             serializer = self.get_serializer(page, many=True)
+#             return self.paginator.get_paginated_response(
+#                 {
+#                     "success": True,
+#                     "message": "Inspections retrieved successfully",
+#                     "inspections": serializer.data
+#                 },
+#                 **totals
+#             )
+        
+
+
+class InspectionDetailView(RetrieveAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = InspectionSerializer
+    queryset = Inspection.objects.all()  # REQUIRED for RetrieveAPIView
+
+    def retrieve(self, request, *args, **kwargs):
+        inspection = self.get_object()  # uses pk from URL
+        serializer = self.get_serializer(inspection)
+
+        return Response({
+            "success": True,
+            "message": "Inspection details retrieved successfully",
+            "inspection": serializer.data
+        })
+
+
 class InspectionListCreateView(ListCreateAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = InspectionSerializer
     parser_classes = [MultiPartParser, FormParser, JSONParser]
-    pagination_class = InspectionPagination  # ← add pagination
+    pagination_class = InspectionPagination
 
     def get_queryset(self):
-        return Inspection.objects.filter(schedule=self.kwargs["schedule_id"])
+        return Inspection.objects.filter(
+            schedule=self.kwargs["schedule_id"]
+        ).order_by('-inspected_at')  # ✅ Latest first
 
     def perform_create(self, serializer):
         schedule_id = self.kwargs["schedule_id"]
-        # Save the inspection
         inspection = serializer.save(schedule_id=schedule_id)
 
-        # ------------------ Broadcast full serialized data ------------------
-        inspection_data = InspectionSerializer(inspection).data  # includes all fields
+        inspection_data = InspectionSerializer(inspection).data
 
         channel_layer = get_channel_layer()
         group_name = f"schedule_{schedule_id}"
@@ -893,16 +974,14 @@ class InspectionListCreateView(ListCreateAPIView):
         async_to_sync(channel_layer.group_send)(
             group_name,
             {
-                "type": "inspection_created",      # this tells the consumer which method to call
-                "event": "inspection_created",    # optional extra info
-                "data": inspection_data           # your full inspection data
+                "type": "inspection_created",
+                "event": "inspection_created",
+                "data": inspection_data
             }
         )
 
         return inspection
 
-
-    # ✅ Custom success response
     def create(self, request, *args, **kwargs):
         response = super().create(request, *args, **kwargs)
         return Response({
@@ -910,8 +989,6 @@ class InspectionListCreateView(ListCreateAPIView):
             "message": "Inspection created successfully",
             "inspection": response.data
         }, status=status.HTTP_201_CREATED)
-
-    # ---------- GET CUSTOM RESPONSE with pagination ----------
 
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
@@ -932,23 +1009,6 @@ class InspectionListCreateView(ListCreateAPIView):
                 },
                 **totals
             )
-        
-
-
-class InspectionDetailView(RetrieveAPIView):
-    permission_classes = [IsAuthenticated]
-    serializer_class = InspectionSerializer
-    queryset = Inspection.objects.all()  # REQUIRED for RetrieveAPIView
-
-    def retrieve(self, request, *args, **kwargs):
-        inspection = self.get_object()  # uses pk from URL
-        serializer = self.get_serializer(inspection)
-
-        return Response({
-            "success": True,
-            "message": "Inspection details retrieved successfully",
-            "inspection": serializer.data
-        })
 
 
 # -----------------------------------

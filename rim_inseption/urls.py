@@ -27,14 +27,10 @@ schema_view = get_schema_view(
     openapi.Info(
         title="RIM INSPECTION API",
         default_version='v1',
-        description="API documentation for my project",
     ),
-    public=True,
-    permission_classes=(permissions.AllowAny,),
+    public=True,   # 👈 MUST BE TRUE
+    permission_classes=(permissions.AllowAny,),  # 👈 IMPORTANT
 )
-
-
-
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -47,8 +43,13 @@ urlpatterns = [
 ]
 
 # Add this block at the end
+# if settings.DEBUG:
+#     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+# urls.py
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)  # 👈 Add this
 
 
 

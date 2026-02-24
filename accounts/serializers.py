@@ -22,7 +22,9 @@ class RegisterSerializer(serializers.ModelSerializer):
         UserProfile.objects.create(user=user)
         return user
 
-
+class LoginSerializer(serializers.Serializer):
+    login = serializers.CharField()
+    password = serializers.CharField()
 
 class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:

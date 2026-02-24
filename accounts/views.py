@@ -15,6 +15,7 @@ from robot_management.models import Robot
 from .serializers import *
 from rest_framework.pagination import PageNumberPagination
 from rest_framework_simplejwt.views import TokenVerifyView
+from drf_yasg.utils import swagger_auto_schema
 # ------------------- Registration -------------------
 class RegisterAPIView(APIView):
     permission_classes = [AllowAny]
@@ -33,7 +34,9 @@ class RegisterAPIView(APIView):
 
 class LoginAPIView(APIView):
     permission_classes = [AllowAny]
+    serializer_class = LoginSerializer
 
+    @swagger_auto_schema(request_body=LoginSerializer)  
     def post(self, request):
         login_value = request.data.get("login")
         password = request.data.get("password")
