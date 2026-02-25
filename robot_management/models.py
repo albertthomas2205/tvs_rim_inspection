@@ -73,7 +73,8 @@ class Robot(models.Model):
 
     speak_start = models.BooleanField(default=False)
 
-
+    operation_mode = models.JSONField(default=dict, blank=True)
+    
     # Inspection
     inspection_status = models.CharField(
         max_length=20,

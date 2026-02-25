@@ -108,6 +108,9 @@ Use Supervisor / Systemd to manage:
 Daphne
 
 Celery worker
+run celery 
+
+rim_inseption$ celery -A rim_inseption worker -l info
 
 Redis
 
