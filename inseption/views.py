@@ -41,22 +41,23 @@ from .serializers import RimTypeSerializer
 # ----------- Custom Pagination Class -----------
 
 class InspectionPagination(PageNumberPagination):
-    page_size = 5
+    page_size = 6
     page_size_query_param = 'page_size'
     max_page_size = 1000
 
-    def get_paginated_response(self, data, *, total_defected=0, total_non_defected=0):
+    def get_paginated_response(self, data, **kwargs):
         return Response({
             "count": self.page.paginator.count,
-            "total_defected": total_defected,
-            "total_non_defected": total_non_defected,
             "next": self.get_next_link(),
             "previous": self.get_previous_link(),
+            "total_defected": kwargs.get("total_defected", 0),
+            "total_non_defected": kwargs.get("total_non_defected", 0),
+            "total_human_verified": kwargs.get("total_human_verified", 0),
+            "total_non_human_verified": kwargs.get("total_non_human_verified", 0),
+            "total_approved": kwargs.get("total_approved", 0),
+            "total_non_approved": kwargs.get("total_non_approved", 0),
             "results": data
         })
-    
-
-
 
 class SchedulePagination(PageNumberPagination):
     page_size = 8
@@ -994,10 +995,13 @@ class InspectionListCreateView(ListCreateAPIView):
         queryset = self.get_queryset()
 
         totals = queryset.aggregate(
-            total_defected=Count("id", filter=Q(is_defect=True)),
-            total_non_defected=Count("id", filter=Q(is_defect=False)),
-        )
-
+        total_defected=Count("id", filter=Q(is_defect=True)),
+        total_non_defected=Count("id", filter=Q(is_defect=False)),
+        total_human_verified=Count("id", filter=Q(is_human_verified=True)),
+        total_non_human_verified=Count("id", filter=Q(is_human_verified=False)),
+        total_approved=Count("id", filter=Q(is_approved=True)),
+        total_non_approved=Count("id", filter=Q(is_approved=False)),
+    )
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
@@ -1009,7 +1013,6 @@ class InspectionListCreateView(ListCreateAPIView):
                 },
                 **totals
             )
-
 
 # -----------------------------------
 # CREATE INSPECTION (Standalone)

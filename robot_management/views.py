@@ -26,17 +26,19 @@ from django.db.models import Count, Q
 from .models import RobotLocation,CalibrateHand,Profile
 from robot_management.models import Robot
 from .serializers import RobotLocationSerializer,EmergencySerializer,SpeakStartSerializer,CalibrateHandSerializer,ProfileSerializer
+from .serializers import *
 
 from django.shortcuts import get_object_or_404
 
 
 from .models import RobotNavigation, Robot
 from .serializers import RobotNavigationUpdateSerializer
+from accounts.models import RobotUser
 
 class RobotPagination(PageNumberPagination):
     page_size = 4               # max 5 robots
     page_size_query_param = 'page_size'
-    max_page_size = 4
+    # max_page_size = 4
 
 
 class RobotViewSet(viewsets.ModelViewSet):
@@ -132,12 +134,21 @@ class RobotViewSet(viewsets.ModelViewSet):
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
 
+        totals = queryset.aggregate(
+            total_robots=Count("id"),
+            active_count=Count("id", filter=Q(is_active=True)),
+            inactive_count=Count("id", filter=Q(is_active=False)),
+        )
+
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             return self.get_paginated_response({
                 "success": True,
                 "message": "Robots fetched successfully",
+                "total_robots": totals["total_robots"],
+                "active_count": totals["active_count"],
+                "inactive_count": totals["inactive_count"],
                 "data": serializer.data
             })
 
@@ -146,6 +157,9 @@ class RobotViewSet(viewsets.ModelViewSet):
             {
                 "success": True,
                 "message": "Robots fetched successfully",
+                "total_robots": totals["total_robots"],
+                "active_count": totals["active_count"],
+                "inactive_count": totals["inactive_count"],
                 "data": serializer.data
             },
             status=status.HTTP_200_OK
@@ -178,6 +192,63 @@ class RobotViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         serializer.save(updated_by=self.request.user)
 
+    def partial_update(self, request, *args, **kwargs):
+        robot = self.get_object()
+        old_is_active = robot.is_active
+
+        response = super().partial_update(request, *args, **kwargs)
+
+        robot.refresh_from_db()
+
+        # 🔥 Only run if is_active changed
+        if "is_active" in request.data and old_is_active != robot.is_active:
+
+            channel_layer = get_channel_layer()
+            robo_id = robot.robo_id
+
+            event_name = (
+                "robot_activated"
+                if robot.is_active
+                else "robot_deactivated"
+            )
+
+            event_data = {
+                "robo_id": robo_id,
+                "status": "active" if robot.is_active else "inactive",
+                "message": f"Robot {robo_id} has been {'activated' if robot.is_active else 'deactivated'}",
+                "performed_by": request.user.username
+            }
+
+            # ✅ Get ALL assigned user IDs
+            assigned_user_ids = list(
+                RobotUser.objects
+                .filter(robot=robot)
+                .values_list("user_id", flat=True)
+            )
+
+            # 🔥 1️⃣ Send to robot device
+            async_to_sync(channel_layer.group_send)(
+                f"robot_message_{robo_id}",
+                {
+                    "type": "robot_message",
+                    "event": event_name,
+                    "data": event_data
+                }
+            )
+
+            # 🔥 2️⃣ Send to ALL assigned users
+            for user_id in assigned_user_ids:
+                async_to_sync(channel_layer.group_send)(
+                    f"robots_user_{user_id}",
+                    {
+                        "type": "robots_event",
+                        "event": event_name,
+                        "data": event_data
+                    }
+                )
+
+        return response
+
     # Deactivate (DELETE)
     # def destroy(self, request, *args, **kwargs):
     #     if not request.user.is_superuser:
@@ -196,7 +267,92 @@ class RobotViewSet(viewsets.ModelViewSet):
     #     )
     
 
+    # def destroy(self, request, *args, **kwargs):
+    #     if not request.user.is_superuser:
+    #         return Response(
+    #             {"success": False, "message": "Permission denied"},
+    #             status=status.HTTP_403_FORBIDDEN
+    #         )
+
+    #     robot = self.get_object()
+    #     force = request.query_params.get("force") == "true"
+
+    #     if force:
+    #         robot.delete()
+    #         message = "Robot permanently deleted"
+    #     else:
+    #         robot.is_active = False
+    #         robot.save(update_fields=["is_active"])
+    #         message = "Robot deactivated"
+
+    #     return Response(
+    #         {"success": True, "message": message},
+    #         status=status.HTTP_200_OK
+    #     )
+
+    
+    
+    
+    # def destroy(self, request, *args, **kwargs):
+    #     if not request.user.is_superuser:
+    #         return Response(
+    #             {"success": False, "message": "Permission denied"},
+    #             status=status.HTTP_403_FORBIDDEN
+    #         )
+
+    #     robot = self.get_object()
+    #     force = request.query_params.get("force") == "true"
+    #     channel_layer = get_channel_layer()
+
+    #     robo_id = robot.robo_id
+
+    #     if force:
+    #         robot.delete()
+    #         action = "deleted"
+    #         status_value = "deleted"
+    #         message = f"Robot {robo_id} permanently deleted."
+    #     else:
+    #         robot.is_active = False
+    #         robot.save(update_fields=["is_active"])
+    #         action = "deactivated"
+    #         status_value = "inactive"
+    #         message = f"Robot {robo_id} deactivated."
+
+    #     event_data = {
+    #         "robo_id": robo_id,
+    #         "action": action,
+    #         "message": message,
+    #         "status": status_value,
+    #     }
+
+    #     # 🔥 1️⃣ Send to individual robot consumer
+    #     async_to_sync(channel_layer.group_send)(
+    #         f"robot_message_{robo_id}",
+    #         {
+    #             "type": "robot_message",  # MUST match RobotMessageConsumer
+    #             "event": "robot_status_updated",
+    #             "data": event_data
+    #         }
+    #     )
+
+    #     # 🔥 2️⃣ Send to global robots consumer
+    #     async_to_sync(channel_layer.group_send)(
+    #         "robots_group",
+    #         {
+    #             "type": "robots_event",   # MUST match RobotsConsumer
+    #             "event": "robot_status_updated",
+    #             "data": event_data
+    #         }
+    #     )
+
+    #     return Response(
+    #         {"success": True, "message": message},
+    #         status=status.HTTP_200_OK
+    #     )
+
+
     def destroy(self, request, *args, **kwargs):
+
         if not request.user.is_superuser:
             return Response(
                 {"success": False, "message": "Permission denied"},
@@ -206,13 +362,58 @@ class RobotViewSet(viewsets.ModelViewSet):
         robot = self.get_object()
         force = request.query_params.get("force") == "true"
 
+        channel_layer = get_channel_layer()
+
+        # ✅ VERY IMPORTANT: fetch assigned users BEFORE delete
+        assigned_user_ids = list(
+            RobotUser.objects
+            .filter(robot=robot)
+            .values_list("user_id", flat=True)
+        )
+
+        print(assigned_user_ids)
+
+        robo_id = robot.robo_id
+
         if force:
             robot.delete()
-            message = "Robot permanently deleted"
+            event_name = "robot_deleted"
+            status_value = "deleted"
+            message = f"Robot {robo_id} has been permanently deleted."
         else:
             robot.is_active = False
             robot.save(update_fields=["is_active"])
-            message = "Robot deactivated"
+            event_name = "robot_deactivated"
+            status_value = "inactive"
+            message = f"Robot {robo_id} has been deactivated."
+
+        event_payload = {
+            "robo_id": robo_id,
+            "status": status_value,
+            "message": message,
+            "performed_by": request.user.username
+        }
+
+        # 🔥 1️⃣ Robot device group
+        async_to_sync(channel_layer.group_send)(
+            f"robot_message_{robo_id}",
+            {
+                "type": "robot_message",
+                "event": event_name,
+                "data": event_payload
+            }
+        )
+
+        # 🔥 2️⃣ ALL assigned users (this is what you want)
+        for user_id in assigned_user_ids:
+            async_to_sync(channel_layer.group_send)(
+                f"robots_user_{user_id}",
+                {
+                    "type": "robots_event",
+                    "event": event_name,
+                    "data": event_payload
+                }
+            )
 
         return Response(
             {"success": True, "message": message},
@@ -1456,3 +1657,156 @@ class RobotModeActiveAPIView(APIView):
             },
             status=status.HTTP_200_OK
         )
+
+
+
+# class RobotMapCreateUpdateAPIView(APIView):
+
+#     def get(self, request, robot_id):
+#         try:
+#             # 🔹 URL sends normal id
+#             robot = Robot.objects.get(id=robot_id)
+#         except Robot.DoesNotExist:
+#             return Response(
+#                 {"error": "Robot not found"},
+#                 status=status.HTTP_404_NOT_FOUND
+#             )
+
+#         serializer = RobotOperationModeSerializer(robot)
+#         return Response(serializer.data, status=status.HTTP_200_OK)
+
+#     def post(self, request, robot_id):
+#         try:
+#             # 🔹 Fetch using normal id
+#             robot = Robot.objects.get(id=robot_id)
+#         except Robot.DoesNotExist:
+#             return Response(
+#                 {"error": "Robot not found"},
+#                 status=status.HTTP_404_NOT_FOUND
+#             )
+
+#         operation_mode = request.data.get("operation_mode")
+
+#         if operation_mode is None:
+#             return Response(
+#                 {"error": "operation_mode is required"},
+#                 status=status.HTTP_400_BAD_REQUEST
+#             )
+
+#         # 🔹 Update DB
+#         robot.operation_mode = operation_mode
+#         robot.save()
+
+#         # 🔥 Use robo_id for WebSocket group
+#         robo_id = robot.robo_id   # example: "rb1"
+
+#         channel_layer = get_channel_layer()
+#         group_name = f"robot_message_{robo_id}"
+
+#         async_to_sync(channel_layer.group_send)(
+#             group_name,
+#             {
+#                 "type": "robot_message",
+#                 "event": "operation_mode_updated",
+#                 "data": {
+#                     "robot_id": robot.id,        # normal id
+#                     "robo_id": robo_id,          # rb1
+#                     "operation_mode": operation_mode
+#                 }
+#             }
+#         )
+
+#         return Response(
+#             {
+#                 "message": "Operation mode updated successfully",
+#                 "robot_id": robot.id,
+#                 "robo_id": robo_id,
+#                 "operation_mode": operation_mode
+#             },
+#             status=status.HTTP_200_OK
+#         )
+
+
+class RobotMapCreateUpdateAPIView(APIView):
+
+    def get(self, request, robot_id):
+        try:
+            robot = Robot.objects.get(id=robot_id)
+        except Robot.DoesNotExist:
+            return Response(
+                {
+                    "success": False,
+                    "error": "Robot not found"
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = RobotOperationModeSerializer(robot)
+        return Response(
+            {
+                "success": True,
+                "data": serializer.data
+            },
+            status=status.HTTP_200_OK
+        )
+
+    def post(self, request, robot_id):
+        try:
+            robot = Robot.objects.get(id=robot_id)
+        except Robot.DoesNotExist:
+            return Response(
+                {
+                    "success": False,
+                    "error": "Robot not found"
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        operation_mode = request.data.get("operation_mode")
+
+        if operation_mode is None:
+            return Response(
+                {
+                    "success": False,
+                    "error": "operation_mode is required"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        robot.operation_mode = operation_mode
+        robot.save()
+
+        robo_id = robot.robo_id
+
+        channel_layer = get_channel_layer()
+        group_name = f"robot_message_{robo_id}"
+
+        async_to_sync(channel_layer.group_send)(
+            group_name,
+            {
+                "type": "robot_message",
+                "event": "operation_mode_updated",
+                "data": {
+                    "robot_id": robot.id,
+                    "robo_id": robo_id,
+                    "operation_mode": operation_mode
+                }
+            }
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": "Operation mode updated successfully",
+                "robot_id": robot.id,
+                "robo_id": robo_id,
+                "operation_mode": operation_mode
+            },
+            status=status.HTTP_200_OK
+        )
+    
+
+
+
+
+    

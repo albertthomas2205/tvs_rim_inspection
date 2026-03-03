@@ -22,7 +22,6 @@ urlpatterns = [
     path("robots/event/", RobotEventBroadcastAPIView.as_view()),
     path('robots/', robot_list, name='robot-list'),
     path('robots/<int:pk>/', robot_detail, name='robot-detail'),
-
     path(
         "robots/<int:robot_id>/map/",
         RobotMapCreateUpdateAPIView.as_view(),
@@ -124,5 +123,11 @@ path(
         RobotModeActiveAPIView.as_view(),
         name="robot-mode-active"
     ),
+
+path(
+    "robots/<int:robot_id>/operation-mode/",
+    RobotMapCreateUpdateAPIView.as_view(),
+    name="robot-operation"
+),
 
 ]

@@ -16,6 +16,9 @@ from .serializers import *
 from rest_framework.pagination import PageNumberPagination
 from rest_framework_simplejwt.views import TokenVerifyView
 from drf_yasg.utils import swagger_auto_schema
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+
 # ------------------- Registration -------------------
 class RegisterAPIView(APIView):
     permission_classes = [AllowAny]
@@ -88,7 +91,8 @@ class LoginAPIView(APIView):
                 "refresh": str(refresh),
                 "username": user.username,
                 "email": user.email,
-                "role": role
+                "role": role,
+                "user_id":user.id
             }
         }, status=200)
 
@@ -99,7 +103,7 @@ class MeAPIView(APIView):
     def get(self, request):
         user = request.user
         return Response({
-            "userid":user.id,
+            "user_id":user.id,
             "username": user.username,
             "email": user.email,
             "is_verified": hasattr(user, "profile") and user.profile.is_verified
@@ -219,6 +223,36 @@ def list_users(request):
 
 
 
+# @api_view(["PATCH"])
+# @permission_classes([IsAuthenticated, IsAdminUser])
+# def update_user(request, user_id):
+#     try:
+#         user = User.objects.select_related("profile").get(id=user_id)
+#     except User.DoesNotExist:
+#         return Response(
+#             {"success": False, "message": "User not found"},
+#             status=404
+#         )
+
+#     profile = user.profile
+
+#     # Only allow profile updates
+#     is_verified = request.data.get("is_verified")
+
+#     if is_verified is not None:
+#         profile.is_verified = is_verified
+#         profile.save()
+
+#     return Response({
+#         "success": True,
+#         "message": "User updated successfully",
+#         "data": {
+#             "user_id": user.id,
+#             "username": user.username,
+#             "is_verified": profile.is_verified
+#         }
+#     })
+
 @api_view(["PATCH"])
 @permission_classes([IsAuthenticated, IsAdminUser])
 def update_user(request, user_id):
@@ -232,8 +266,38 @@ def update_user(request, user_id):
 
     profile = user.profile
 
-    # Only allow profile updates
+    # User fields
+    username = request.data.get("username")
+    email = request.data.get("email")
+    first_name = request.data.get("first_name")
+    last_name = request.data.get("last_name")
+    is_active = request.data.get("is_active")
+
+    # Profile fields
     is_verified = request.data.get("is_verified")
+
+    # Validate username uniqueness if being changed
+    if username and username != user.username:
+        if User.objects.filter(username=username).exists():
+            return Response(
+                {"success": False, "message": "Username already taken"},
+                status=400
+            )
+        user.username = username
+
+    if email and email != user.email:
+        if User.objects.filter(email=email).exists():
+            return Response(
+                {"success": False, "message": "Email already in use"},
+                status=400
+            )
+        user.email = email
+
+
+    if is_active is not None:
+        user.is_active = is_active
+
+    user.save()
 
     if is_verified is not None:
         profile.is_verified = is_verified
@@ -245,6 +309,8 @@ def update_user(request, user_id):
         "data": {
             "user_id": user.id,
             "username": user.username,
+            "email": user.email,
+            "is_active": user.is_active,
             "is_verified": profile.is_verified
         }
     })
@@ -299,30 +365,122 @@ class RemoveUserFromRobot(APIView):
             "message": "User removed from robot"
         })
 
+# class AssignRobotsToUserView(APIView):
+#     permission_classes = [IsAdminUser]
+
+#     def post(self, request):
+#         serializer = UserRobotAssignSerializer(data=request.data)
+#         serializer.is_valid(raise_exception=True)
+
+#         user_id = serializer.validated_data["user_id"]
+#         robot_ids = serializer.validated_data["robot_ids"]
+
+#         user = User.objects.get(id=user_id)
+#         robots = Robot.objects.filter(robo_id__in=robot_ids)
+
+#         assigned = []
+#         already_assigned = []
+
+#         for robot in robots:
+#             obj, created = RobotUser.objects.get_or_create(
+#                 user=user,
+#                 robot=robot,
+#                 defaults={"assigned_by": request.user}
+#             )
+#             if created:
+#                 assigned.append(robot.robo_id)
+#             else:
+#                 already_assigned.append(robot.robo_id)
+
+#         return Response(
+#             {
+#                 "success": True,
+#                 "message": "Robots assignment processed",
+#                 "user": user.username,
+#                 "assigned_robots": assigned,
+#                 "already_assigned": already_assigned
+#             },
+#             status=status.HTTP_200_OK
+#         )
+
+
+
+
+
 class AssignRobotsToUserView(APIView):
     permission_classes = [IsAdminUser]
 
     def post(self, request):
+
         serializer = UserRobotAssignSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         user_id = serializer.validated_data["user_id"]
         robot_ids = serializer.validated_data["robot_ids"]
 
-        user = User.objects.get(id=user_id)
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response(
+                {"error": "User not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
         robots = Robot.objects.filter(robo_id__in=robot_ids)
+        channel_layer = get_channel_layer()
 
         assigned = []
         already_assigned = []
 
         for robot in robots:
+
             obj, created = RobotUser.objects.get_or_create(
                 user=user,
                 robot=robot,
                 defaults={"assigned_by": request.user}
             )
+
             if created:
                 assigned.append(robot.robo_id)
+
+                event_data = {
+                    "robo_id": robot.robo_id,
+                    "action": "assigned",
+                    "assigned_to": user.username,
+                    "performed_by": request.user.username,
+                    "message": f"Robot {robot.robo_id} assigned to {user.username}"
+                }
+
+                # 🔥 1️⃣ Send to robot device
+                async_to_sync(channel_layer.group_send)(
+                    f"robot_message_{robot.robo_id}",
+                    {
+                        "type": "robot_message",
+                        "event": "robot_assigned",
+                        "data": event_data
+                    }
+                )
+
+                # 🔥 2️⃣ Send to global admin dashboard (if you use it)
+                async_to_sync(channel_layer.group_send)(
+                    "robots_group",
+                    {
+                        "type": "robots_event",
+                        "event": "robot_status_updated",
+                        "data": event_data
+                    }
+                )
+
+                # 🔥 3️⃣ Send ONLY to that user's dashboard
+                async_to_sync(channel_layer.group_send)(
+                    f"robots_user_{user.id}",
+                    {
+                        "type": "robots_event",
+                        "event": "robot_assigned",
+                        "data": event_data
+                    }
+                )
+
             else:
                 already_assigned.append(robot.robo_id)
 
@@ -336,6 +494,31 @@ class AssignRobotsToUserView(APIView):
             },
             status=status.HTTP_200_OK
         )
+    
+# class RemoveRobotsFromUserView(APIView):
+#     permission_classes = [IsAdminUser]
+
+#     def post(self, request):
+#         serializer = UserRobotAssignSerializer(data=request.data)
+#         serializer.is_valid(raise_exception=True)
+
+#         user_id = serializer.validated_data["user_id"]
+#         robot_ids = serializer.validated_data["robot_ids"]
+
+#         deleted, _ = RobotUser.objects.filter(
+#             user_id=user_id,
+#             robot__robo_id__in=robot_ids
+#         ).delete()
+
+#         return Response(
+#             {
+#                 "success": True,
+#                 "message": "Robots removed from user",
+#                 "removed_count": deleted
+#             },
+#             status=status.HTTP_200_OK
+#         )
+
 
 class RemoveRobotsFromUserView(APIView):
     permission_classes = [IsAdminUser]
@@ -347,20 +530,55 @@ class RemoveRobotsFromUserView(APIView):
         user_id = serializer.validated_data["user_id"]
         robot_ids = serializer.validated_data["robot_ids"]
 
-        deleted, _ = RobotUser.objects.filter(
+        user = User.objects.get(id=user_id)
+        channel_layer = get_channel_layer()
+
+        robot_users = RobotUser.objects.filter(
             user_id=user_id,
             robot__robo_id__in=robot_ids
-        ).delete()
+        )
+
+        robots = [ru.robot for ru in robot_users]
+
+        robot_users.delete()
+
+        for robot in robots:
+            event_data = {
+                "robo_id": robot.robo_id,
+                "action": "unassigned",
+                "removed_from": user.username,
+                "performed_by": request.user.username,
+                "message": f"Robot {robot.robo_id} removed from {user.username}"
+            }
+
+            # 🔥 Individual group
+            async_to_sync(channel_layer.group_send)(
+                f"robot_message_{robot.robo_id}",
+                {
+                    "type": "robot_message",
+                    "event": "robot_unassigned",
+                    "data": event_data
+                }
+            )
+
+            # 🔥 Global group
+            async_to_sync(channel_layer.group_send)(
+                f"robots_user_{user_id}",
+                {
+                    "type": "robots_event",
+                    "event": "robot_unassigned",
+                    "data": event_data
+                }
+            )
 
         return Response(
             {
                 "success": True,
                 "message": "Robots removed from user",
-                "removed_count": deleted
+                "removed_count": len(robots)
             },
             status=status.HTTP_200_OK
         )
-
 
 class CustomTokenVerifyView(TokenVerifyView):
 
