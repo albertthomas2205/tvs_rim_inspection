@@ -1611,18 +1611,25 @@ def rim_type_list_create(request):
     if request.method == "GET":
         rim_types = RimType.objects.all().order_by("-created_at")
 
+        # ---------------- COUNTS ----------------
+        total_count = rim_types.count()
+        total_active = rim_types.filter(is_active=True).count()
+        total_inactive = rim_types.filter(is_active=False).count()
+
         # ---------------- PAGINATION ----------------
         paginator = RimTypePagination()
         page = paginator.paginate_queryset(rim_types, request)
         serializer = RimTypeSerializer(page, many=True)
 
-        # return paginated response
         return paginator.get_paginated_response({
             "success": True,
             "message": "Rim types retrieved successfully",
+            "total_count": total_count,
+            "total_active": total_active,
+            "total_inactive": total_inactive,
             "data": serializer.data
         })
-
+    
     if request.method == "POST":
         serializer = RimTypeSerializer(data=request.data)
         if serializer.is_valid():

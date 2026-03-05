@@ -1727,7 +1727,7 @@ class RobotModeActiveAPIView(APIView):
 #         )
 
 
-class RobotMapCreateUpdateAPIView(APIView):
+class RobotModeCreateUpdateAPIView(APIView):
 
     def get(self, request, robot_id):
         try:

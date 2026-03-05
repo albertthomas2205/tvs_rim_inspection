@@ -126,7 +126,7 @@ path(
 
 path(
     "robots/<int:robot_id>/operation-mode/",
-    RobotMapCreateUpdateAPIView.as_view(),
+    RobotModeCreateUpdateAPIView.as_view(),
     name="robot-operation"
 ),
 
