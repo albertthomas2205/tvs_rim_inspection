@@ -45,7 +45,7 @@ class InspectionHumanVerifySerializer(serializers.ModelSerializer):
         # ---------------- AI CORRECT ----------------
         if false_detected is False:
             # Auto approve
-            attrs["is_approved"] = True
+            # attrs["is_approved"] = True
             attrs["correct_label"] = None
             # description is OPTIONAL here
             return attrs
